@@ -1,0 +1,913 @@
+<<<<<<< HEAD
+/* frontend/src/index.css o App.css */
+
+/* Variables CSS para colores de gráficos que se adaptan al tema */
+:root {
+  /* --chart-color-1: #4a90e2; /* Primary blue */
+  --chart-color-1: #be0000; /* Rojo oscuro para el gráfico 1 */
+  --chart-color-2: #ed8936; /* Orange */
+  --chart-color-3: #48bb78; /* Green */
+  --chart-color-4: #a0aec0; /* Gray */
+  --chart-color-5: #e53e3e; /* Red */
+  --chart-color-6: #ecc94b; /* Yellow */
+  --chart-color-7: #805ad5; /* Purple */
+  --chart-color-8: #ff7300; /* Darker Orange */
+  --chart-color-9: #8884d8; /* Light Purple (Recharts default) */
+
+  /* Nuevo: Color de texto para elementos de gráfico y leyendas */
+  --chart-text-color: #333; /* Color oscuro para modo claro */
+
+  /* Colores de la aplicación */
+  --background-color: #f0f2f5; /* Light mode background */
+  --text-color: #333;
+  --primary-color: #be0000; /* Rojo oscuro principal */
+  --secondary-color: #6c757d;
+  --card-background: #ffffff;
+  --border-color: #e0e0e0;
+  --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.1);
+  --success-color: #28a745;
+  --error-color: #dc3545;
+  --info-color: #0483ff;
+  --warning-color: #ffc107;
+  --text-light: #666;
+  --text-dark: #eee;
+  --input-background: #ffffff; /* Fondo para inputs */
+}
+
+.dark {
+  /* --chart-color-1: #63b3ed; /* Lighter blue for dark mode */
+  --chart-color-1: #B22222; /* Rojo más claro para dark mode */
+  --chart-color-2: #f6ad55; /* Lighter orange for dark mode */
+  --chart-color-3: #68d391; /* Lighter green for dark mode */
+  --chart-color-4: #cbd5e0; /* Lighter gray for dark mode */
+  --chart-color-5: #fc8181; /* Lighter red for dark mode */
+  --chart-color-6: #fbd38d; /* Lighter yellow for dark mode */
+  --chart-color-7: #b794f4; /* Lighter purple for dark mode */
+  --chart-color-8: #f6ad55; /* Lighter darker orange for dark mode */
+  --chart-color-9: #a78bfa; /* Lighter light purple for dark mode */
+
+  /* Nuevo: Color de texto para elementos de gráfico y leyendas en modo oscuro */
+  --chart-text-color: #e2e8f0; /* Color claro para modo oscuro */
+
+  /* Colores de la aplicación en modo oscuro */
+  --background-color: #1a202c; /* Tailwind's gray-900 */
+  --text-color: #e2e8f0; /* Tailwind's gray-200 */
+  --primary-color: #B22222; /* Rojo más claro para dark mode */
+  --secondary-color: #a0aec0; /* Tailwind's gray-500 */
+  --card-background: #2d3748; /* Tailwind's gray-800 */
+  --border-color: #4a5568; /* Tailwind's gray-700 */
+  --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.3);
+  --success-color: #48bb78;
+  --error-color: #f56565;
+  --info-color: #4299e1;
+  --warning-color: #f6e05e;
+  --text-light: #a0aec0;
+  --text-dark: #e2e8f0;
+  --input-background: #2d3748; /* Fondo para inputs en dark mode */
+}
+
+
+/* Layout de la cuadrícula de métricas */
+.metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 1.5rem;
+  margin-top: 2rem;
+}
+
+.metric-card {
+  background-color: var(--card-background); /* Usar el color de fondo de la tarjeta */
+  padding: 1.5rem;
+  border-radius: 0.75rem;
+  box-shadow: var(--shadow-md);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 120px;
+  text-align: center;
+  color: var(--text-color); /* MODIFICACIÓN: Usar el color de texto general */
+  font-weight: bold;
+}
+
+.metric-title {
+  font-size: 1.125rem;
+  margin-bottom: 0.5rem;
+  color: var(--primary-color); /* Opcional: para que el título tenga un color distintivo */
+}
+
+.metric-value {
+  font-size: 2.25rem;
+  color: var(--text-color); /* MODIFICACIÓN: Asegurar que el valor use el color de texto general */
+}
+
+
+/* Layout de la cuadrícula de gráficos */
+.charts-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 1.5rem;
+  margin-top: 2rem;
+}
+
+.chart-card {
+  background-color: var(--card-background);
+  padding: 1.5rem;
+  border-radius: 0.75rem;
+  box-shadow: var(--shadow-md);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-height: 350px;
+  max-height: 450px;
+}
+
+.chart-title {
+  font-size: 1.25rem;
+  font-weight: bold;
+  color: var(--primary-color);
+  margin-bottom: 1rem;
+  text-align: center;
+}
+
+/* Estilos para la sección de reportes */
+.reports-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+  gap: 1.5rem;
+  margin-top: 2rem;
+}
+
+.report-card {
+  background-color: var(--card-background);
+  padding: 1.5rem;
+  border-radius: 0.75rem;
+  box-shadow: var(--shadow-md);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-height: 400px;
+  max-height: 550px;
+}
+
+.report-card-title {
+  font-size: 1.5rem;
+  font-weight: bold;
+  color: var(--primary-color);
+  margin-bottom: 1rem;
+  text-align: center;
+}
+
+.chart-container-large {
+  width: 100%;
+  height: 100%;
+  flex-grow: 1;
+}
+
+
+/* Estilos para badges de estado */
+.status-badge {
+  display: inline-block;
+  padding: 0.25em 0.6em;
+  font-size: 0.75em;
+  font-weight: 700;
+  line-height: 1;
+  text-align: center;
+  white-space: nowrap;
+  vertical-align: baseline;
+  border-radius: 0.375rem; /* rounded-md */
+  color: #fff;
+}
+
+.status-new { background-color: #6c757d; } /* secondary */
+.status-open { background-color: #ed8936; } /* orange-500 */
+.status-in-progress { background-color: var(--primary-color); } /* Usar el nuevo primary-color (rojo oscuro) */
+.status-resolved { background-color: #48bb78; } /* green-500 */
+.status-closed { background-color: #a0aec0; } /* gray-500 */
+
+/* Estilos para badges de prioridad */
+.priority-badge {
+  display: inline-block;
+  padding: 0.25em 0.6em;
+  font-size: 0.75em;
+  font-weight: 700;
+  line-height: 1;
+  text-align: center;
+  white-space: nowrap;
+  vertical-align: baseline;
+  border-radius: 0.375rem;
+  color: #fff;
+}
+
+.priority-low { background-color: #48bb78; } /* green-500 */
+.priority-medium { background-color: #ecc94b; } /* yellow-500 */
+.priority-high { background-color: #e53e3e; } /* red-600 */
+
+/* Estilos para badges de rol */
+.role-badge {
+  display: inline-block;
+  padding: 0.25em 0.6em;
+  font-size: 0.75em;
+  font-weight: 700;
+  line-height: 1;
+  text-align: center;
+  white-space: nowrap;
+  vertical-align: baseline;
+  border-radius: 0.375rem;
+  color: #fff;
+}
+
+.role-admin { background-color: #805ad5; } /* purple-600 */
+.role-agent { background-color: var(--primary-color); } /* Usar el nuevo primary-color (rojo oscuro) */
+.role-user { background-color: var(--primary-color); } /* Usar el nuevo primary-color (rojo oscuro) */
+
+/* Estilos generales para botones */
+.button {
+  padding: 0.75rem 1.5rem;
+  border-radius: 0.5rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease-in-out;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  border: none;
+}
+
+.primary-button {
+  background-color: var(--primary-color);
+  color: #fff;
+}
+
+.primary-button:hover {
+  background-color: #6A0000; /* Un tono más oscuro de rojo oscuro para hover */
+  box-shadow: 0 4px 8px rgba(139, 0, 0, 0.3);
+}
+
+.secondary-button {
+  background-color: var(--secondary-color);
+  color: #fff;
+}
+
+.secondary-button:hover {
+  background-color: #5a6268; /* Un tono más oscuro de secondary */
+  box-shadow: 0 4px 8px rgba(108, 117, 125, 0.3);
+}
+
+.delete-button {
+  background-color: var(--error-color);
+  color: #fff;
+}
+
+.delete-button:hover {
+  background-color: #c82333;
+  box-shadow: 0 4px 8px rgba(220, 53, 69, 0.3);
+}
+
+.view-button {
+  background-color: var(--info-color);
+  color: #fff;
+}
+
+.view-button:hover {
+  background-color: #138496;
+  box-shadow: 0 4px 8px rgba(23, 162, 184, 0.3);
+}
+
+.small-button {
+  padding: 0.5rem 1rem;
+  font-size: 0.875rem; /* text-sm */
+  border-radius: 0.375rem; /* rounded-md */
+}
+
+/* Estilos para tablas */
+.table-responsive {
+  overflow-x: auto;
+  margin-bottom: 2rem;
+}
+
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  background-color: var(--card-background);
+  border-radius: 0.75rem;
+  overflow: hidden; /* Para que los bordes redondeados se apliquen correctamente */
+  box-shadow: var(--shadow-md);
+}
+
+.data-table th,
+.data-table td {
+  padding: 1rem 1.25rem;
+  text-align: left;
+  border-bottom: 1px solid var(--border-color);
+  color: var(--text-color);
+}
+
+.data-table th {
+  background-color: var(--primary-color); /* Usar el nuevo primary-color (rojo oscuro) */
+  color: #fff;
+  font-weight: 600;
+  text-transform: uppercase;
+  font-size: 0.875rem;
+}
+
+.data-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.data-table tbody tr:hover {
+  background-color: var(--border-color); /* Light hover effect */
+}
+
+/* Estilos para formularios */
+.form-group {
+  margin-bottom: 1rem;
+  width: 100%; /* Asegura que los grupos de formulario ocupen todo el ancho disponible */
+}
+
+.form-label {
+  display: block;
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+  color: var(--text-color);
+}
+
+.form-input,
+.form-select,
+.form-textarea {
+  width: 100%;
+  padding: 0.75rem;
+  border: 1px solid var(--border-color);
+  border-radius: 0.5rem;
+  background-color: var(--input-background);
+  color: var(--text-color);
+  transition: border-color 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+}
+
+.form-input:focus,
+.form-select:focus,
+.form-textarea:focus {
+  border-color: var(--primary-color); /* Usar el nuevo primary-color (rojo oscuro) */
+  box-shadow: 0 0 0 3px rgba(139, 0, 0, 0.2); /* Sombra con el nuevo primary-color */
+  outline: none;
+}
+
+.form-textarea {
+  resize: vertical;
+}
+
+/* Mensajes de estado */
+.loading-message,
+.error-message,
+.info-text {
+  padding: 1rem;
+  border-radius: 0.5rem;
+  margin-bottom: 1rem;
+  text-align: center;
+  font-weight: 500;
+}
+
+.loading-message {
+  background-color: #e0f2f7; /* light blue */
+  color: #0288d1; /* dark blue */
+}
+
+.error-message {
+  background-color: #ffebee; /* light red */
+  color: #d32f2f; /* dark red */
+}
+
+.info-text {
+  color: var(--text-color);
+}
+
+
+/* Estilos para el layout del dashboard */
+.admin-dashboard-layout {
+  display: flex;
+  min-height: calc(100vh - 64px); /* Asume un navbar de 64px de alto */
+  background-color: var(--background-color);
+  color: var(--text-color);
+}
+
+.sidebar {
+  width: 250px;
+  background-color: var(--card-background);
+  padding: 2rem 1.5rem;
+  box-shadow: var(--shadow-md);
+  border-right: 1px solid var(--border-color);
+  flex-shrink: 0; /* Evita que la barra lateral se encoja */
+}
+
+.sidebar-title {
+  font-size: 1.75rem;
+  font-weight: bold;
+  color: var(--primary-color); /* Usar el nuevo primary-color (rojo oscuro) */
+  margin-bottom: 2rem;
+  text-align: center;
+}
+
+.sidebar-nav {
+  display: flex;
+  flex-direction: column;
+}
+
+.nav-item {
+  background: none;
+  border: none;
+  padding: 1rem 1.25rem;
+  margin-bottom: 0.5rem;
+  color: var(--text-color);
+  font-size: 1rem;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+  border-radius: 0.5rem;
+  transition: background-color 0.2s ease-in-out, color 0.2s ease-in-out;
+}
+
+.nav-item:hover {
+  background-color: var(--border-color);
+  color: var(--primary-color); /* Usar el nuevo primary-color (rojo oscuro) */
+}
+
+.nav-item.active {
+  background-color: var(--primary-color); /* Usar el nuevo primary-color (rojo oscuro) */
+  color: #fff;
+  font-weight: 600;
+}
+
+.nav-item.active:hover {
+  background-color: var(--primary-color); /* No cambiar al hacer hover si ya está activo */
+  color: #fff;
+}
+
+.content-area {
+  flex-grow: 1;
+  padding: 2rem;
+  overflow-y: auto; /* Permite desplazamiento si el contenido es largo */
+}
+
+.main-dashboard-container,
+.ticket-list-container,
+.user-list-container,
+.department-list-container,
+.reports-dashboard-container,
+.activity-log-dashboard-container,
+.notifications-container {
+  background-color: var(--card-background);
+  padding: 2rem;
+  border-radius: 0.75rem;
+  box-shadow: var(--shadow-md);
+  margin-bottom: 2rem;
+}
+
+/* Estilos para el modal */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.7);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
+}
+
+.modal-content, .modal-content-ticket {
+  background-color: var(--card-background);
+  padding: 2.5rem;
+  border-radius: 0.75rem;
+  box-shadow: var(--shadow-md);
+  max-width: 600px; /* Ancho máximo para modales generales */
+  width: 90%;
+  position: relative;
+  max-height: 90vh; /* Limita la altura máxima del modal */
+  overflow-y: auto; /* Permite desplazamiento interno si el contenido es largo */
+}
+
+.modal-content-ticket {
+  max-width: 800px; /* Ancho un poco mayor para el modal de tickets */
+}
+
+.modal-close-button {
+  position: absolute;
+  top: 1rem;
+  right: 1rem;
+  background: none;
+  border: none;
+  font-size: 1.5rem;
+  cursor: pointer;
+  color: var(--text-color);
+}
+
+.modal-title {
+  font-size: 1.75rem;
+  font-weight: bold;
+  color: var(--primary-color); /* Usar el nuevo primary-color (rojo oscuro) */
+  margin-bottom: 1.5rem;
+  text-align: center;
+}
+
+.modal-info-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+@media (min-width: 640px) { /* sm breakpoint */
+  .modal-info-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+.modal-info-item strong {
+  color: var(--primary-color); /* Usar el nuevo primary-color (rojo oscuro) */
+}
+
+.modal-section-title {
+  font-size: 1.25rem;
+  font-weight: bold;
+  color: var(--primary-color); /* Usar el nuevo primary-color (rojo oscuro) */
+  margin-top: 2rem;
+  margin-bottom: 1rem;
+}
+
+.modal-comments-list {
+  max-height: 200px; /* Altura máxima para la lista de comentarios */
+  overflow-y: auto; /* Permite desplazamiento si hay muchos comentarios */
+  border: 1px solid var(--border-color);
+  border-radius: 0.5rem;
+  padding: 1rem;
+  margin-bottom: 1rem;
+  background-color: var(--background-color); /* Fondo ligeramente diferente para la lista */
+}
+
+.modal-comment-item {
+  background-color: var(--card-background);
+  padding: 0.75rem;
+  border-bottom: 1px solid var(--border-color);
+  margin-bottom: 0.5rem;
+  border-radius: 0.375rem;
+}
+
+.modal-comment-item:last-child {
+  border-bottom: none;
+  margin-bottom: 0;
+}
+
+.modal-comment-author {
+  font-weight: 600;
+  color: var(--primary-color); /* Usar el nuevo primary-color (rojo oscuro) */
+  margin-bottom: 0.25rem;
+}
+
+.modal-comment-date {
+  font-size: 0.8rem;
+  color: var(--text-light);
+  font-weight: normal;
+  margin-left: 0.5rem;
+}
+
+.modal-comment-text {
+  color: var(--text-color);
+}
+
+.modal-add-comment {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.modal-actions {
+  margin-top: 2rem;
+  border-top: 1px solid var(--border-color);
+  padding-top: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+/* Responsive adjustments for sidebar */
+@media (max-width: 768px) { /* md breakpoint */
+  .admin-dashboard-layout {
+    flex-direction: column;
+  }
+
+  .sidebar {
+    width: 100%;
+    padding: 1rem;
+    border-right: none;
+    border-bottom: 1px solid var(--border-color);
+  }
+
+  .sidebar-nav {
+    flex-direction: row;
+    overflow-x: auto; /* Permite scroll horizontal en el nav */
+    white-space: nowrap; /* Evita que los ítems se envuelvan */
+    justify-content: flex-start; /* Alinea los ítems al principio */
+    padding-bottom: 0.5rem; /* Espacio para la barra de scroll si aparece */
+  }
+
+  .nav-item {
+    flex-shrink: 0; /* Evita que los ítems se encojan */
+    margin-right: 0.5rem;
+    margin-bottom: 0;
+  }
+
+  .content-area {
+    padding: 1rem;
+  }
+
+  .metrics-grid,
+  .charts-grid,
+  .reports-grid {
+    grid-template-columns: 1fr; /* Una columna en pantallas pequeñas */
+  }
+
+  .filter-controls {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
+/* Estilos para el Registro de Actividad */
+.activity-logs-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem; /* Espacio entre cada elemento de log */
+}
+
+.activity-log-item {
+  background-color: var(--card-background);
+  padding: 1.5rem;
+  border-radius: 0.75rem;
+  box-shadow: var(--shadow-md);
+  border: 1px solid var(--border-color);
+  transition: transform 0.2s ease-in-out;
+}
+
+.activity-log-item:hover {
+  transform: translateY(-3px); /* Pequeño efecto hover */
+}
+
+.activity-log-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.75rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px dashed var(--border-color); /* Línea divisoria sutil */
+}
+
+.activity-log-user {
+  font-weight: 700;
+  color: var(--primary-color); /* Usar el nuevo primary-color (rojo oscuro) */
+  font-size: 1rem;
+}
+
+.activity-log-date {
+  font-size: 0.85rem;
+  color: var(--text-light);
+}
+
+.activity-log-description {
+  margin-bottom: 0.75rem;
+  color: var(--text-color);
+  line-height: 1.5;
+}
+
+.activity-log-value-label {
+  font-weight: 600;
+  color: var(--primary-color); /* Usar el nuevo primary-color (rojo oscuro) */
+  margin-right: 0.5rem;
+  min-width: 40px; /* Asegura un ancho mínimo para "De:" y "A:" */
+  display: inline-block;
+}
+
+.activity-log-value-change {
+  background-color: var(--background-color); /* Fondo ligero para los cambios de valor */
+  padding: 0.75rem;
+  border-radius: 0.5rem;
+  border: 1px solid var(--border-color);
+  margin-top: 0.5rem;
+  font-family: 'monospace', 'Courier New', Courier, monospace; /* Fuente monoespaciada para JSON */
+  font-size: 0.9rem;
+  color: var(--text-color);
+  white-space: pre-wrap; /* Permite saltos de línea en pre */
+  word-break: break-word; /* Rompe palabras largas */
+}
+
+/* Estilos para los badges dentro de renderLogValue */
+.activity-log-value-change .status-badge,
+.activity-log-value-change .priority-badge,
+.activity-log-value-change .role-badge {
+  font-size: 0.85em; /* Ligeramente más grande que los badges normales */
+  padding: 0.3em 0.7em;
+}
+
+/* Estilos para el Tooltip de Recharts */
+.custom-tooltip {
+  background-color: var(--card-background); /* Fondo del tooltip */
+  border: 1px solid var(--border-color);
+  padding: 0.75rem;
+  border-radius: 0.5rem;
+  box-shadow: var(--shadow-md);
+  color: var(--text-color); /* Color del texto del tooltip */
+}
+
+.custom-tooltip .label {
+  font-weight: bold;
+  margin-bottom: 0.25rem;
+}
+
+.chart-card {
+  background-color: var(--card-background);
+  padding: 1.5rem;
+  border-radius: 0.75rem;
+  box-shadow: var(--shadow-md);
+  display: flex; /* Importante para que flex-grow funcione en el hijo */
+  flex-direction: column; /* Importante para que flex-grow funcione en el hijo */
+  align-items: center;
+  min-height: 350px; /* Asegura una altura mínima para la tarjeta */
+  max-height: 450px; /* Opcional: limita la altura máxima */
+}
+
+/* Este contenedor es el padre directo de ResponsiveContainer */
+.chart-container-large {
+  width: 100%;
+  height: 100%; /* ¡Crucial! Hace que ResponsiveContainer herede 100% de esta altura */
+  flex-grow: 1; /* Permite que este div ocupe el espacio restante dentro de .chart-card */
+  /* Añade un fondo para depurar si aún no se ve el gráfico */
+  /* background-color: rgba(255, 0, 0, 0.1); */ /* Temporal: para ver el área del gráfico */
+}
+
+/* Clases específicas para botones en la barra de navegación */
+.button.primary-button-nav {
+  @apply bg-blue-600 text-white px-4 py-2 rounded-md shadow-md hover:bg-blue-700 transition-colors duration-200;
+}
+
+.button.secondary-button-nav {
+  @apply bg-gray-700 text-white px-4 py-2 rounded-md shadow-md hover:bg-gray-600 transition-colors duration-200 border border-gray-600;
+}
+
+/* ... tus estilos existentes ... */
+
+/* Asegúrate de que tu .navbar tenga el color de fondo correcto */
+.navbar {
+  /* Ya lo definimos en Layout.tsx con bg-gray-800, pero si tienes una clase .navbar en CSS, asegúrate de que no la sobrescriba */
+  /* background-color: var(--primary-dark);  <-- Si tienes esto, cámbialo o elimínalo */
+}
+
+/* Ajustes para enlaces de navegación */
+.nav-link {
+  @apply text-white hover:text-gray-300 transition-colors duration-200;
+}
+
+.nav-text {
+  @apply text-white;
+}
+
+/* Y si tienes una clase .navbar-brand o similar, asegúrate de que su texto sea blanco */
+.navbar-brand a {
+  @apply text-white;
+=======
+/* frontend/src/index.css */
+
+:root {
+    /* Colores del tema oscuro */
+    --background-color: #1a1a2e; /* Fondo principal */
+    --card-background: #16213e; /* Fondo para tarjetas/paneles */
+    --primary-color: #0f3460; /* Azul oscuro primario */
+    --primary-color-dark: #0a2342; /* Azul más oscuro para hover/active */
+    --secondary-color: #e94560; /* Rojo/rosa de acento */
+    --accent-color: #00bcd4; /* Cian/turquesa para resaltar */
+    --text-color: #e0e0e0; /* Texto claro */
+    --text-color-light: #f5f5f5; /* Texto aún más claro */
+    --border-color: #2c394b; /* Bordes sutiles */
+    --input-background: #0d162a; /* Fondo para campos de entrada */
+    --danger-color: #dc3545; /* Rojo para errores/acciones peligrosas */
+    --danger-color-light: #f8d7da; /* Fondo suave para errores */
+    --success-color: #28a745; /* Verde para éxito */
+    --success-color-light: #d4edda; /* Fondo suave para éxito */
+}
+
+body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+        'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+        sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-webkit-font-smoothing: grayscale;
+    background-color: var(--background-color); /* Aplica el color de fondo */
+    color: var(--text-color); /* Aplica el color de texto por defecto */
+    min-height: 100vh; /* Asegura que el body ocupe al menos toda la altura de la vista */
+    display: flex;
+    flex-direction: column; /* Para que el footer se quede abajo */
+}
+
+code {
+    font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
+        monospace;
+}
+
+/* Estilos globales para botones */
+.button {
+    padding: 10px 20px;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 1em;
+    transition: background-color 0.2s ease, transform 0.1s ease;
+    text-decoration: none; /* Para usar con <Link> también */
+    display: inline-block; /* Para que padding funcione en enlaces */
+    text-align: center;
+}
+
+.button:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.primary-button {
+    background-color: var(--primary-color);
+    color: var(--text-color-light);
+}
+
+.primary-button:hover:not(:disabled) {
+    background-color: var(--primary-color-dark);
+    transform: translateY(-1px);
+}
+
+.secondary-button {
+    background-color: var(--secondary-color);
+    color: var(--text-color);
+}
+
+.secondary-button:hover:not(:disabled) {
+    background-color: #c43851; /* Un tono más oscuro del secondary */
+    transform: translateY(-1px);
+}
+
+.outline-button {
+    background-color: transparent;
+    border: 1px solid var(--primary-color);
+    color: var(--primary-color);
+}
+
+.outline-button:hover:not(:disabled) {
+    background-color: var(--primary-color);
+    color: var(--text-color-light);
+    transform: translateY(-1px);
+}
+
+.danger-button {
+    background-color: var(--danger-color);
+    color: var(--text-color-light);
+}
+
+.danger-button:hover:not(:disabled) {
+    background-color: #b02a37; /* Un tono más oscuro del danger */
+    transform: translateY(-1px);
+}
+
+/* Clases de utilidad */
+.container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 20px;
+    flex-grow: 1; /* Permite que el contenido del dashboard ocupe el espacio restante */
+}
+
+.login-card {
+    background-color: var(--card-background);
+    padding: 30px;
+    border-radius: 10px;
+    box-shadow: 0 5px 15px rgba(0, 0, 0, 0.3);
+    text-align: center;
+    max-width: 500px;
+    margin: 40px auto;
+    color: var(--text-color);
+}
+
+/* Para mensajes */
+.message {
+    padding: 10px;
+    margin-bottom: 15px;
+    border-radius: 5px;
+    text-align: center;
+    font-weight: bold;
+}
+
+/* Estilos de texto */
+h1, h2, h3, h4, h5, h6 {
+    color: var(--text-color-light);
+}
+
+p {
+    color: var(--text-color);
+>>>>>>> 738f5bd513da1312d47de3d73a8767aec7efc67e
+}

@@ -1,0 +1,48 @@
+{
+  "compilerOptions": {
+    "target": "es5",
+    "lib": [
+      "dom",
+      "dom.iterable",
+      "esnext"
+    ],
+    "allowJs": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "strict": true,
+    "forceConsistentCasingInFileNames": true,
+    "noEmit": true,
+    "isolatedModules": true,
+    "jsx": "react-jsx",
+    "module": "esnext",
+    "moduleResolution": "node",
+    "resolveJsonModule": true,
+    "outDir": "./build",
+<<<<<<< HEAD
+    "rootDir": "./src"
+    // NOTA: 'baseUrl' y 'paths' han sido eliminados temporalmente para depuración.
+    // Si esto resuelve el problema, podemos reintroducirlos con cuidado si son necesarios.
+=======
+    "rootDir": "./src",
+    "baseUrl": "./src",
+    "paths": {
+      "*": [
+        "node_modules/*",
+        "src/types/*"
+      ]
+    }
+>>>>>>> 738f5bd513da1312d47de3d73a8767aec7efc67e
+  },
+  "include": [
+    "src"
+  ],
+  "exclude": [
+    "node_modules",
+    "build"
+  ]
+<<<<<<< HEAD
+}
+=======
+}
+>>>>>>> 738f5bd513da1312d47de3d73a8767aec7efc67e

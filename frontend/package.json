@@ -1,0 +1,65 @@
+{
+  "name": "frontend",
+  "version": "0.1.0",
+  "private": true,
+  "dependencies": {
+    "@testing-library/jest-dom": "^5.17.0",
+    "@testing-library/react": "^13.4.0",
+    "@testing-library/user-event": "^13.5.0",
+    "@types/jest": "^27.5.2",
+    "@types/node": "^16.18.101",
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "axios": "^1.7.2",
+<<<<<<< HEAD
+    "date-fns": "^4.1.0",
+    "jwt-decode": "^4.0.0",
+    "lucide-react": "^0.525.0",
+=======
+>>>>>>> 738f5bd513da1312d47de3d73a8767aec7efc67e
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-icons": "4.11.0",
+    "react-router-dom": "^6.24.1",
+    "react-scripts": "5.0.1",
+<<<<<<< HEAD
+    "recharts": "^3.0.2",
+    "uuid": "^11.1.0",
+=======
+>>>>>>> 738f5bd513da1312d47de3d73a8767aec7efc67e
+    "web-vitals": "^2.1.4"
+  },
+  "scripts": {
+    "start": "react-scripts start",
+    "build": "react-scripts build",
+    "test": "react-scripts test",
+    "eject": "react-scripts eject"
+  },
+  "eslintConfig": {
+    "extends": [
+      "react-app",
+      "react-app/jest"
+    ]
+  },
+  "browserslist": {
+    "production": [
+      ">0.2%",
+      "not dead",
+      "not op_mini all"
+    ],
+    "development": [
+      "last 1 chrome version",
+      "last 1 firefox version",
+      "last 1 safari version"
+    ]
+  },
+  "devDependencies": {
+<<<<<<< HEAD
+    "@types/date-fns": "^2.5.3",
+    "@types/uuid": "^10.0.0",
+    "typescript": "^4.9.5"
+=======
+    "typescript": "^4.9.5" 
+>>>>>>> 738f5bd513da1312d47de3d73a8767aec7efc67e
+  }
+}

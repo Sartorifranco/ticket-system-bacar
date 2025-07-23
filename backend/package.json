@@ -1,0 +1,39 @@
+{
+  "name": "backend",
+  "version": "1.0.0",
+  "main": "src/app.js",
+  "scripts": {
+    "start": "node src/app.js",
+    "dev": "SET PORT=5000 && node src/app.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "Backend API para el Sistema de Tickets",
+  "dependencies": {
+<<<<<<< HEAD
+    "bcrypt": "^6.0.0",
+=======
+>>>>>>> 738f5bd513da1312d47de3d73a8767aec7efc67e
+    "bcryptjs": "^2.4.3",
+    "colors": "^1.4.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+<<<<<<< HEAD
+    "express": "4.17.1",
+    "express-async-handler": "^1.2.0",
+    "jsonwebtoken": "^9.0.2",
+    "multer": "^2.0.1",
+    "mysql2": "1.5.2"
+=======
+    "express": "^4.19.2",
+    "express-async-handler": "^1.2.0",
+    "jsonwebtoken": "^9.0.2",
+    "multer": "^2.0.1",
+    "mysql2": "^3.10.2"
+>>>>>>> 738f5bd513da1312d47de3d73a8767aec7efc67e
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.10"
+  }
+}
