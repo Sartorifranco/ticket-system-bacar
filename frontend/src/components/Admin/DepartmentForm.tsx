@@ -1,128 +1,131 @@
-// frontend/src/components/Admin/DepartmentForm.tsx
 import React, { useState, useEffect } from 'react';
 import departmentService, { Department, NewDepartment } from '../../services/departmentService';
-import axios from 'axios'; // Asegúrate de importar axios para el manejo de errores
-// import './DepartmentForm.css'; // <-- Si tienes un archivo CSS para esto, impórtalo aquí
+import { useAuth } from '../../context/AuthContext'; 
+import { useNotification } from '../../context/NotificationContext'; // <-- AÑADIDO: Importar useNotification
+import { isAxiosErrorTypeGuard, ApiResponseError } from '../../utils/typeGuards'; 
 
 interface DepartmentFormProps {
-  departmentToEdit: Department | null;
-  onClose: () => void;
-  onDepartmentCreatedOrUpdated: () => void;
+    departmentToEdit?: Department | null;
+    onSave: () => void;
+    onCancel: () => void;
+    token: string | null; // AÑADIDO: token como prop
 }
 
-const DepartmentForm: React.FC<DepartmentFormProps> = ({ departmentToEdit, onClose, onDepartmentCreatedOrUpdated }) => {
-  const [formData, setFormData] = useState<NewDepartment>({
-    name: '',
-    description: '',
-  });
-  const [loading, setLoading] = useState<boolean>(false);
-  const [error, setError] = useState<string | null>(null);
+const DepartmentForm: React.FC<DepartmentFormProps> = ({ departmentToEdit, onSave, onCancel, token }) => {
+    const { addNotification } = useNotification(); // <-- MODIFICADO: Obtener addNotification del contexto de notificaciones
+    const [formData, setFormData] = useState<NewDepartment>({
+        name: departmentToEdit?.name || '',
+        description: departmentToEdit?.description || '',
+    });
+    const [loading, setLoading] = useState(false);
+    const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (departmentToEdit) {
-      setFormData({
-        name: departmentToEdit.name,
-        description: departmentToEdit.description,
-      });
-    } else {
-      setFormData({
-        name: '',
-        description: '',
-      });
-    }
-    setError(null);
-  }, [departmentToEdit]);
+    useEffect(() => {
+        if (departmentToEdit) {
+            setFormData({
+                name: departmentToEdit.name,
+                description: departmentToEdit.description,
+            });
+        } else {
+            setFormData({ name: '', description: '' });
+        }
+    }, [departmentToEdit]);
 
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
-    const { name, value } = e.target;
-    setFormData((prev) => ({
-      ...prev,
-      [name]: value,
-    }));
-  };
+    const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+        const { name, value } = e.target;
+        setFormData((prev) => ({ ...prev, [name]: value }));
+    };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoading(true);
-    setError(null);
+    const handleSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        setLoading(true);
+        setError(null);
 
-    try {
-      if (departmentToEdit) {
-        await departmentService.updateDepartment(departmentToEdit.id, formData);
-        alert('Departamento actualizado exitosamente!');
-      } else {
-        await departmentService.createDepartment(formData);
-        alert('Departamento creado exitosamente!');
-        setFormData({ name: '', description: '' });
-      }
-      onDepartmentCreatedOrUpdated();
-      onClose();
-    } catch (err: unknown) { // Cambiar 'any' a 'unknown' para un mejor tipado
-      if (axios.isAxiosError(err)) {
-        setError(err.response?.data?.message || `Error ${err.response?.status}: ${err.message || 'Error al guardar departamento.'}`);
-      } else {
-        setError('Ocurrió un error inesperado al guardar departamento.');
-      }
-      console.error('Error al guardar departamento:', err);
-    } finally {
-      setLoading(false);
-    }
-  };
+        if (!token) {
+            addNotification('No autorizado. Por favor, inicia sesión de nuevo.', 'error');
+            setLoading(false);
+            return;
+        }
 
-  return (
-    // ELIMINA formContainerStyle y usa una clase CSS si es posible
-    <div /* style={formContainerStyle} */>
-      <h3>{departmentToEdit ? `Editar Departamento #${departmentToEdit.id}` : 'Crear Nuevo Departamento'}</h3>
-      {error && <p style={{ color: 'red' }}>{error}</p>}
-      <form onSubmit={handleSubmit}>
-        {/* ELIMINA formGroupStyle y usa una clase CSS si es posible */}
-        <div /* style={formGroupStyle} */>
-          <label htmlFor="name" /* style={labelStyle} */>Nombre del Departamento:</label>
-          {/* ELIMINA inputStyle y usa una clase CSS si es posible */}
-          <input
-            type="text"
-            id="name"
-            name="name"
-            value={formData.name}
-            onChange={handleChange}
-            /* style={inputStyle} */
-            required
-          />
-        </div>
-        {/* Repetir eliminación de estilos para los demás formGroupStyle e inputStyle */}
-        <div /* style={formGroupStyle} */>
-          <label htmlFor="description" /* style={labelStyle} */>Descripción:</label>
-          <textarea
-            id="description"
-            name="description"
-            value={formData.description}
-            onChange={handleChange}
-            /* style={inputStyle} */
-            rows={3}
-            required
-          ></textarea>
-        </div>
-        {/* ELIMINA buttonGroupStyle y usa una clase CSS si es posible */}
-        <div /* style={buttonGroupStyle} */>
-          {/* ELIMINA buttonStyle y usa una clase CSS si es posible */}
-          <button type="submit" disabled={loading} /* style={{ ...buttonStyle, backgroundColor: '#28a745' }} */>
-            {loading ? 'Guardando...' : departmentToEdit ? 'Actualizar Departamento' : 'Crear Departamento'}
-          </button>
-          <button type="button" onClick={onClose} /* style={{ ...buttonStyle, backgroundColor: '#6c757d', marginLeft: '10px' }} */>
-            Cancelar
-          </button>
-        </div>
-      </form>
-    </div>
-  );
+        try {
+            if (departmentToEdit) {
+                await departmentService.updateDepartment(token, departmentToEdit.id, formData);
+                addNotification('Departamento actualizado exitosamente!', 'success');
+            } else {
+                await departmentService.createDepartment(token, formData);
+                addNotification('Departamento creado exitosamente!', 'success');
+                setFormData({ name: '', description: '' }); 
+            }
+            onSave(); 
+        } catch (err: unknown) {
+            if (isAxiosErrorTypeGuard(err)) {
+                const apiError = err.response?.data as ApiResponseError;
+                setError(apiError?.message || 'Error al guardar el departamento.');
+                addNotification(`Error al guardar departamento: ${apiError?.message || 'Error desconocido'}`, 'error');
+            } else {
+                setError('Ocurrió un error inesperado al guardar el departamento.');
+            }
+            console.error('Error saving department:', err);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    return (
+        <form onSubmit={handleSubmit} className="p-4 bg-white rounded-lg shadow-md">
+            <h2 className="text-2xl font-bold text-gray-800 mb-4">
+                {departmentToEdit ? 'Editar Departamento' : 'Crear Departamento'}
+            </h2>
+            {error && <div className="text-red-500 mb-4">{error}</div>}
+            <div className="mb-4">
+                <label htmlFor="name" className="block text-gray-700 text-sm font-bold mb-2">
+                    Nombre:
+                </label>
+                <input
+                    type="text"
+                    id="name"
+                    name="name"
+                    className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                    value={formData.name}
+                    onChange={handleChange}
+                    required
+                    disabled={loading}
+                />
+            </div>
+            <div className="mb-4">
+                <label htmlFor="description" className="block text-gray-700 text-sm font-bold mb-2">
+                    Descripción:
+                </label>
+                <textarea
+                    id="description"
+                    name="description"
+                    className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                    value={formData.description}
+                    onChange={handleChange}
+                    rows={3}
+                    required
+                    disabled={loading}
+                ></textarea>
+            </div>
+            <div className="flex justify-end gap-3">
+                <button
+                    type="button"
+                    onClick={onCancel}
+                    className="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-4 rounded-md transition-colors duration-200"
+                    disabled={loading}
+                >
+                    Cancelar
+                </button>
+                <button
+                    type="submit"
+                    className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-md transition-colors duration-200"
+                    disabled={loading}
+                >
+                    {loading ? 'Guardando...' : (departmentToEdit ? 'Actualizar' : 'Crear')}
+                </button>
+            </div>
+        </form>
+    );
 };
-
-// ELIMINA TODOS ESTOS ESTILOS EN LÍNEA
-// const formContainerStyle: React.CSSProperties = { ... };
-// const formGroupStyle: React.CSSProperties = { ... };
-// const labelStyle: React.CSSProperties = { ... };
-// const inputStyle: React.CSSProperties = { ... };
-// const buttonGroupStyle: React.CSSProperties = { ... };
-// const buttonStyle: React.CSSProperties = { ... };
 
 export default DepartmentForm;

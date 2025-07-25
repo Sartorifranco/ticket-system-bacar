@@ -2,12 +2,14 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import api from '../../config/axiosConfig';
 import { useAuth } from '../../context/AuthContext';
+import { useNotification } from '../../context/NotificationContext'; // <-- AÑADIDO: Importar useNotification
 import { ActivityLog, User, Department } from '../../types'; 
 import { isAxiosErrorTypeGuard, ApiResponseError } from '../../utils/typeGuards';
 import { translateTerm, ticketStatusTranslations, ticketPriorityTranslations, userRoleTranslations, targetTypeTranslations } from '../../utils/traslations';
 
 const ActivityLogDashboard: React.FC = () => {
-    const { token, addNotification, signOut } = useAuth();
+    const { token, signOut } = useAuth(); // <-- MODIFICADO: Solo token y signOut de useAuth
+    const { addNotification } = useNotification(); // <-- AÑADIDO: addNotification de useNotification
     const [activityLogs, setActivityLogs] = useState<ActivityLog[]>([]);
     const [users, setUsers] = useState<User[]>([]); 
     const [departments, setDepartments] = useState<Department[]>([]); 

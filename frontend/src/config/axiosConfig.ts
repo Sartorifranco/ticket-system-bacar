@@ -1,32 +1,21 @@
-// frontend/src/config/axiosConfig.ts
-<<<<<<< HEAD
-import axios from 'axios';
+import axios, { InternalAxiosRequestConfig, AxiosResponse } from 'axios';
 
 // Define la URL base de tu backend
 // ¡IMPORTANTE! Asegúrate de que termine con una barra para evitar problemas de concatenación
-// CORREGIDO: Nueva dirección IP
+// Usa la dirección IP específica para el entorno local
 const API_BASE_URL = 'http://192.168.0.236:5000'; 
 
 const api = axios.create({
   // Asegura que la baseURL siempre termina con una barra
   baseURL: API_BASE_URL.endsWith('/') ? API_BASE_URL : `${API_BASE_URL}/`,
-=======
-import axios, { InternalAxiosRequestConfig } from 'axios';
-
-const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || 'http://localhost:5000';
-
-const api = axios.create({
-  baseURL: API_BASE_URL, // <--- CAMBIO CLAVE: SOLO LA BASE URL, SIN "/api"
->>>>>>> 738f5bd513da1312d47de3d73a8767aec7efc67e
   headers: {
     'Content-Type': 'application/json',
   },
 });
 
-<<<<<<< HEAD
 // Interceptor para añadir el token de autenticación a cada petición
 api.interceptors.request.use(
-  (config) => {
+  (config: InternalAxiosRequestConfig) => {
     const token = localStorage.getItem('token'); // Recupera el token del localStorage
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
@@ -40,15 +29,6 @@ api.interceptors.request.use(
     let requestUrl = config.url || ''; // Asigna una cadena vacía si config.url es undefined
     const finalUrl = `${config.baseURL}${requestUrl.startsWith('/') ? requestUrl.substring(1) : requestUrl}`;
     console.log(`[Axios Interceptor] ENVIANDO PETICIÓN FINAL A: ${finalUrl} | Token Presente: ${!!token}`);
-=======
-// Interceptor para añadir el token JWT a las cabeceras de cada petición
-api.interceptors.request.use(
-  (config: InternalAxiosRequestConfig) => {
-    const token = localStorage.getItem('token');
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
-    }
->>>>>>> 738f5bd513da1312d47de3d73a8767aec7efc67e
     return config;
   },
   (error) => {
@@ -56,10 +36,9 @@ api.interceptors.request.use(
   }
 );
 
-<<<<<<< HEAD
 // Interceptor para manejar respuestas de error (opcional, pero útil)
 api.interceptors.response.use(
-  (response) => response,
+  (response: AxiosResponse) => response,
   (error) => {
     if (error.response) {
       if (error.response.status === 401) {
@@ -79,6 +58,3 @@ api.interceptors.response.use(
 );
 
 export default api;
-=======
-export default api;
->>>>>>> 738f5bd513da1312d47de3d73a8767aec7efc67e

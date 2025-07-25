@@ -3,11 +3,13 @@ import React, { useState, useEffect, useCallback } from 'react';
 import api from '../../config/axiosConfig';
 import { BacarKey } from '../../types'; 
 import { useAuth } from '../../context/AuthContext';
+import { useNotification } from '../../context/NotificationContext'; // <-- AÑADIDO: Importar useNotification
 import { isAxiosErrorTypeGuard, ApiResponseError } from '../../utils/typeGuards';
 import BacarKeyEditModal from './BacarKeyEditModal'; 
 
 const BacarKeys: React.FC = () => {
-    const { token, addNotification, signOut } = useAuth();
+    const { token, signOut } = useAuth(); // <-- MODIFICADO: Solo token y signOut de useAuth
+    const { addNotification } = useNotification(); // <-- AÑADIDO: addNotification de useNotification
     const [bacarKeys, setBacarKeys] = useState<BacarKey[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);

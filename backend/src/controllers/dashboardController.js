@@ -71,7 +71,7 @@ const getDashboardMetrics = asyncHandler(async (req, res) => {
         const [ticketsByAgentResult] = await pool.execute(
             `SELECT COALESCE(u.username, 'unassigned') AS agent_name, COUNT(t.id) AS count
              FROM tickets t
-             LEFT JOIN users u ON t.agent_id = u.id
+             LEFT JOIN users u ON t.agent_id = u.id -- USANDO agent_id
              GROUP BY agent_name`
         );
         const ticketsByAgent = ticketsByAgentResult.map(row => ({
@@ -145,9 +145,9 @@ const getDashboardMetrics = asyncHandler(async (req, res) => {
         const [agentPerformanceResult] = await pool.execute(
             `SELECT COALESCE(u.username, 'unassigned') AS agentName,
                     COUNT(CASE WHEN t.status = 'resolved' THEN 1 ELSE NULL END) AS resolvedTickets,
-                    AVG(TIMESTAMPDIFF(HOUR, t.created_at, t.resolved_at)) AS avgResolutionTimeHours
+                    AVG(TIMESTAMPDIFF(HOUR, t.created_at, t.closed_at)) AS avgResolutionTimeHours -- USANDO closed_at
              FROM tickets t
-             LEFT JOIN users u ON t.agent_id = u.id
+             LEFT JOIN users u ON t.agent_id = u.id -- USANDO agent_id
              GROUP BY agentName`
         );
         const agentPerformance = agentPerformanceResult.map(row => ({
@@ -161,7 +161,7 @@ const getDashboardMetrics = asyncHandler(async (req, res) => {
         const [departmentPerformanceResult] = await pool.execute(
             `SELECT d.name AS departmentName,
                     COUNT(t.id) AS totalTickets,
-                    AVG(TIMESTAMPDIFF(HOUR, t.created_at, t.resolved_at)) AS avgResolutionTimeHours
+                    AVG(TIMESTAMPDIFF(HOUR, t.created_at, t.closed_at)) AS avgResolutionTimeHours -- USANDO closed_at
              FROM tickets t
              JOIN departments d ON t.department_id = d.id
              GROUP BY departmentName`
@@ -179,7 +179,7 @@ const getDashboardMetrics = asyncHandler(async (req, res) => {
             openTickets,
             inProgressTickets,
             resolvedTickets,
-            ticketsByStatus, // Asegurarse de que esto se envíe
+            ticketsByStatus,
             ticketsByPriority,
             ticketsByAgent,
             totalUsers,

@@ -3,6 +3,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import ReactDOM from 'react-dom';
 import api from '../../config/axiosConfig';
 import { useAuth } from '../../context/AuthContext';
+import { useNotification } from '../../context/NotificationContext'; // <-- AÑADIDO: Importar useNotification
 import { BacarKey } from '../../types'; // Importar la interfaz BacarKey
 import { isAxiosErrorTypeGuard, ApiResponseError } from '../../utils/typeGuards';
 
@@ -21,7 +22,8 @@ const BacarKeyEditModal: React.FC<BacarKeyEditModalProps> = ({
     onKeyUpdated,
     token,
 }) => {
-    const { addNotification } = useAuth();
+    // MODIFICADO: addNotification ahora se obtiene de useNotification
+    const { addNotification } = useNotification(); 
     const [deviceUser, setDeviceUser] = useState('');
     const [username, setUsername] = useState('');
     const [password, setPassword] = useState('');

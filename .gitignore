@@ -12,6 +12,12 @@ frontend/dist/
 backend/build/
 backend/dist/
 
+# Ignorar archivos de socket de MySQL
+mysql_data/mysql.sock
+
+# Ignorar la carpeta de datos de MySQL
+mysql_data/
+
 # Archivos de log
 *.log
 npm-debug.log*

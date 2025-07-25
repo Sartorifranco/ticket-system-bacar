@@ -1,330 +1,250 @@
-// frontend/src/components/Admin/TicketDetailForm.tsx
-import React, { useState, useEffect } from 'react';
-import ticketService, { Ticket, Comment } from '../../services/ticketService';
-import userService, { User } from '../../services/userService';
-import departmentService, { Department } from '../../services/departmentService';
-import { useAuth } from '../../context/AuthContext';
-import axios from 'axios'; // Importa axios completo para usar axios.isAxiosError
-
-// Define UpdateTicketData y NewCommentInput si no están en ticketService.ts
-export interface UpdateTicketData { // Renombrada para evitar conflicto con el tipo Ticket
-  subject?: string;
-  description?: string;
-  status?: 'open' | 'in_progress' | 'resolved' | 'closed' | 'assigned';
-  priority?: 'low' | 'medium' | 'high' | 'urgent';
-  agent_id?: number | null;
-  department_id?: number;
-}
-
-export interface NewCommentInput {
-  comment_text: string;
-}
+import React, { useState, useEffect, useCallback } from 'react';
+import { TicketData, User, Department, TicketStatus, TicketPriority } from '../../types';
+import userService from '../../services/userService';
+import departmentService from '../../services/departmentService';
+import { useAuth } from '../../context/AuthContext'; 
+import { useNotification } from '../../context/NotificationContext'; // <-- AÑADIDO: Importar useNotification
+import { isAxiosErrorTypeGuard, ApiResponseError } from '../../utils/typeGuards';
+import api from '../../config/axiosConfig'; 
+import { ticketStatusTranslations, ticketPriorityTranslations } from '../../utils/traslations'; 
 
 interface TicketDetailFormProps {
-  ticketId: number | null;
-  onClose: () => void;
-  onTicketUpdated: () => void; // Callback para indicar que un ticket se ha actualizado
+    ticket: TicketData;
+    onSave: (updatedTicket: TicketData) => void;
+    onCancel: () => void;
+    token: string | null; 
 }
 
-const TicketDetailForm: React.FC<TicketDetailFormProps> = ({ ticketId, onClose, onTicketUpdated }) => {
-  const { user } = useAuth(); // Obtener el usuario autenticado (para comentarios)
-  const [ticket, setTicket] = useState<Ticket | null>(null);
-  const [comments, setComments] = useState<Comment[]>([]);
-  const [agents, setAgents] = useState<User[]>([]); // Para la lista de agentes
-  const [departments, setDepartments] = useState<Department[]>([]); // Para la lista de departamentos
-  const [newCommentText, setNewCommentText] = useState<string>('');
-  const [loading, setLoading] = useState<boolean>(true);
-  const [error, setError] = useState<string | null>(null);
-  const [updateFormData, setUpdateFormData] = useState<UpdateTicketData>({}); // Estado para los datos a actualizar
+const TicketDetailForm: React.FC<TicketDetailFormProps> = ({ ticket, onSave, onCancel, token }) => {
+    const { addNotification } = useNotification(); // <-- MODIFICADO: Obtener addNotification del contexto de notificaciones
+    const [formData, setFormData] = useState<TicketData>(ticket);
+    const [agents, setAgents] = useState<User[]>([]);
+    const [departments, setDepartments] = useState<Department[]>([]);
+    const [loading, setLoading] = useState(false);
+    const [error, setError] = useState<string | null>(null);
 
-  const fetchTicketDetails = async (id: number) => {
-    try {
-      setLoading(true);
-      const { ticket: fetchedTicket, comments: fetchedComments } = await ticketService.getTicketById(id);
-      setTicket(fetchedTicket);
-      setComments(fetchedComments);
-      
-      // Inicializar updateFormData con los datos actuales del ticket
-      setUpdateFormData({
-        subject: fetchedTicket.subject,
-        description: fetchedTicket.description,
-        status: fetchedTicket.status,
-        priority: fetchedTicket.priority,
-        agent_id: fetchedTicket.agent_id,
-        department_id: fetchedTicket.department_id,
-      });
+    useEffect(() => {
+        const fetchAgentsAndDepartments = async () => {
+            setLoading(true);
+            setError(null);
+            try {
+                if (!token) {
+                    addNotification('No autorizado. Token no disponible.', 'error');
+                    setLoading(false);
+                    return;
+                }
+                const allUsers = await userService.getAllUsers(token); 
+                const fetchedAgents = allUsers.filter(u => u.role === 'agent');
+                setAgents(fetchedAgents);
 
-      setError(null);
-    } catch (err: unknown) { // <-- Tipado correcto
-      if (axios.isAxiosError(err)) {
-        setError(err.response?.data?.message || 'Error al cargar los detalles del ticket.');
-      } else {
-        setError('Ocurrió un error inesperado al cargar los detalles del ticket.');
-      }
-      console.error('Error al cargar detalles del ticket:', err);
-    } finally {
-      setLoading(false);
-    }
-  };
+                const fetchedDepartments = await departmentService.getAllDepartments(token); 
+                setDepartments(fetchedDepartments);
+            } catch (err: unknown) { 
+                if (isAxiosErrorTypeGuard(err)) {
+                    const apiError = err.response?.data as ApiResponseError;
+                    setError(apiError?.message || 'Error al cargar agentes o departamentos.');
+                    addNotification(`Error al cargar datos: ${apiError?.message || 'Error desconocido'}`, 'error');
+                } else {
+                    setError('Ocurrió un error inesperado al cargar los datos.');
+                }
+                console.error('Error fetching agents or departments:', err);
+            } finally {
+                setLoading(false);
+            }
+        };
+        fetchAgentsAndDepartments();
+    }, [token, addNotification]); 
 
-  const fetchAgentsAndDepartments = async () => {
-    try {
-      // Obtener solo agentes (users con role 'agent')
-      const allUsers = await userService.getAllUsers();
-      const fetchedAgents = allUsers.filter(u => u.role === 'agent');
-      setAgents(fetchedAgents);
+    useEffect(() => {
+        setFormData(ticket);
+    }, [ticket]);
 
-      // Obtener departamentos
-      const fetchedDepartments = await departmentService.getAllDepartments();
-      setDepartments(fetchedDepartments);
-    } catch (err: unknown) { // <-- Tipado correcto
-      if (axios.isAxiosError(err)) {
-        console.error('Error al cargar agentes o departamentos:', err.response?.data?.message || err);
-        setError(prev => prev ? prev + ' Error al cargar recursos adicionales.' : 'Error al cargar agentes o departamentos.');
-      } else {
-        console.error('Error al cargar agentes o departamentos:', err);
-        setError(prev => prev ? prev + ' Error al cargar recursos adicionales.' : 'Ocurrió un error inesperado al cargar agentes o departamentos.');
-      }
-    }
-  };
+    const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
+        const { name, value } = e.target;
+        setFormData((prev) => ({
+            ...prev,
+            [name]: name === 'department_id' || name === 'assigned_to_user_id' ? (value === '' ? null : parseInt(value)) : value,
+        }));
+    };
 
-  useEffect(() => {
-    if (ticketId) {
-      fetchTicketDetails(ticketId);
-      fetchAgentsAndDepartments();
-    }
-  }, [ticketId]);
+    const handleSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        setLoading(true);
+        setError(null);
 
-  const handleUpdateFieldChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
-    const { name, value } = e.target;
-    setUpdateFormData((prev) => ({ // <-- CORREGIDO: 'prev' infiere el tipo correctamente aquí
-      ...prev,
-      [name]: value === 'null' ? null : (name === 'agent_id' || name === 'department_id' ? parseInt(value) : value),
-    }));
-  };
+        if (!token) {
+            addNotification('No autorizado. Por favor, inicia sesión de nuevo.', 'error');
+            setLoading(false);
+            return;
+        }
 
-  const handleUpdateTicket = async () => {
-    if (!ticketId) return;
-    try {
-      setLoading(true);
-      await ticketService.updateTicket(ticketId, updateFormData);
-      onTicketUpdated(); // Notificar al componente padre que se actualizó el ticket
-      fetchTicketDetails(ticketId); // Recargar los datos para ver los cambios
-      setError(null);
-    } catch (err: unknown) { // <-- Tipado correcto
-      if (axios.isAxiosError(err)) {
-        setError(err.response?.data?.message || 'Error al actualizar el ticket.');
-      } else {
-        setError('Ocurrió un error inesperado al actualizar el ticket.');
-      }
-      console.error('Error al actualizar ticket:', err);
-    } finally {
-      setLoading(false);
-    }
-  };
+        try {
+            const updatedFields: Partial<TicketData> = {};
+            if (formData.title !== ticket.title) updatedFields.title = formData.title; 
+            if (formData.description !== ticket.description) updatedFields.description = formData.description;
+            if (formData.status !== ticket.status) updatedFields.status = formData.status;
+            if (formData.priority !== ticket.priority) updatedFields.priority = formData.priority;
+            if (formData.department_id !== ticket.department_id) updatedFields.department_id = formData.department_id;
+            if (formData.assigned_to_user_id !== ticket.assigned_to_user_id) updatedFields.assigned_to_user_id = formData.assigned_to_user_id; 
 
-  const handleAddComment = async () => {
-    if (!ticketId || !newCommentText.trim() || !user?.id) {
-      setError('El comentario no puede estar vacío y el usuario debe estar autenticado.');
-      return;
-    }
-    try {
-      setLoading(true);
-      // Usar la función correcta del servicio y pasar los parámetros esperados
-      await ticketService.addCommentToTicket(ticketId, newCommentText); // <-- CORREGIDO: Usar addCommentToTicket
-      setNewCommentText('');
-      fetchTicketDetails(ticketId); // Recargar comentarios
-      setError(null);
-    } catch (err: unknown) { // <-- Tipado correcto
-      if (axios.isAxiosError(err)) {
-        setError(err.response?.data?.message || 'Error al agregar comentario.');
-      } else {
-        setError('Ocurrió un error inesperado al agregar comentario.');
-      }
-      console.error('Error al agregar comentario:', err);
-    } finally {
-      setLoading(false);
-    }
-  };
+            if (Object.keys(updatedFields).length === 0) {
+                addNotification('No se detectaron cambios para guardar.', 'info');
+                onCancel(); 
+                return;
+            }
 
-  if (loading) return <p>Cargando detalles del ticket...</p>;
-  if (error) return <p style={{ color: 'red' }}>Error: {error}</p>;
-  if (!ticket) return <p>No se encontró el ticket o hubo un error al cargarlo.</p>;
+            const response = await api.put(`/api/tickets/${ticket.id}`, updatedFields, {
+                headers: { Authorization: `Bearer ${token}` },
+            });
+            addNotification('Ticket actualizado exitosamente!', 'success');
+            onSave(response.data); 
+        } catch (err: unknown) {
+            if (isAxiosErrorTypeGuard(err)) {
+                const apiError = err.response?.data as ApiResponseError;
+                setError(apiError?.message || 'Error al actualizar el ticket.');
+                addNotification(`Error al actualizar ticket: ${apiError?.message || 'Error desconocido'}`, 'error');
+            } else {
+                setError('Ocurrió un error inesperado al actualizar el ticket.');
+            }
+            console.error('Error updating ticket:', err);
+        } finally {
+            setLoading(false);
+        }
+    };
 
-  return (
-    <div style={containerStyle}>
-      <h3>Detalles del Ticket #{ticket.id}</h3>
-      <button onClick={onClose} style={closeButtonStyle}>Cerrar</button>
+    return (
+        <form onSubmit={handleSubmit} className="p-4 bg-white rounded-lg shadow-md">
+            <h2 className="text-2xl font-bold text-gray-800 mb-4">Editar Ticket #{ticket.id}</h2>
+            {error && <div className="text-red-500 mb-4">{error}</div>}
 
-      <div style={detailGridStyle}>
-        <div><strong>Asunto:</strong> <input type="text" name="subject" value={updateFormData.subject || ''} onChange={handleUpdateFieldChange} style={inputStyle} /></div>
-        <div><strong>Descripción:</strong> <textarea name="description" value={updateFormData.description || ''} onChange={handleUpdateFieldChange} style={textareaStyle}></textarea></div>
-        <div>
-          <strong>Estado:</strong>
-          <select name="status" value={updateFormData.status || ''} onChange={handleUpdateFieldChange} style={selectStyle}>
-            <option value="open">Abierto</option>
-            <option value="assigned">Asignado</option>
-            <option value="in_progress">En progreso</option>
-            <option value="resolved">Resuelto</option>
-            <option value="closed">Cerrado</option>
-          </select>
-        </div>
-        <div>
-          <strong>Prioridad:</strong>
-          <select name="priority" value={updateFormData.priority || ''} onChange={handleUpdateFieldChange} style={selectStyle}>
-            <option value="low">Baja</option>
-            <option value="medium">Media</option>
-            <option value="high">Alta</option>
-            <option value="urgent">Urgente</option>
-          </select>
-        </div>
-        <div>
-          <strong>Departamento:</strong>
-          <select name="department_id" value={updateFormData.department_id || ''} onChange={handleUpdateFieldChange} style={selectStyle}>
-            <option value="">Seleccionar Departamento</option>
-            {departments.map(dep => (
-              <option key={dep.id} value={dep.id}>{dep.name}</option>
-            ))}
-          </select>
-        </div>
-        <div>
-          <strong>Agente Asignado:</strong>
-          <select name="agent_id" value={updateFormData.agent_id === null ? 'null' : (updateFormData.agent_id || '')} onChange={handleUpdateFieldChange} style={selectStyle}>
-            <option value="null">Sin Asignar</option>
-            {agents.map(agent => (
-              <option key={agent.id} value={agent.id}>{agent.username}</option>
-            ))}
-          </select>
-        </div>
-        <div><strong>Creado por:</strong> {ticket.user_username}</div>
-        <div><strong>Creado en:</strong> {new Date(ticket.created_at).toLocaleString()}</div>
-        <div><strong>Última Actualización:</strong> {new Date(ticket.updated_at).toLocaleString()}</div>
-      </div>
-
-      <button onClick={handleUpdateTicket} style={{ ...actionButtonStyle, backgroundColor: '#28a745', marginTop: '15px' }}>Actualizar Ticket</button>
-
-      {/* Sección de Comentarios */}
-      <h4 style={{ marginTop: '20px' }}>Comentarios</h4>
-      <div style={commentsContainerStyle}>
-        {comments.length === 0 ? (
-          <p>No hay comentarios para este ticket.</p>
-        ) : (
-          comments.map((comment) => (
-            <div key={comment.id} style={commentStyle}>
-              <strong>{comment.user_username}:</strong> {comment.comment_text}
-              <span style={{ fontSize: '0.8em', color: '#666', marginLeft: '10px' }}>
-                {new Date(comment.created_at).toLocaleString()}
-              </span>
+            <div className="mb-4">
+                <label htmlFor="title" className="block text-gray-700 text-sm font-bold mb-2"> 
+                    Asunto:
+                </label>
+                <input
+                    type="text"
+                    id="title"
+                    name="title" 
+                    className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                    value={formData.title} 
+                    onChange={handleChange}
+                    required
+                    disabled={loading}
+                />
             </div>
-          ))
-        )}
-      </div>
 
-      <div style={newCommentStyle}>
-        <textarea
-          placeholder="Añadir un nuevo comentario..."
-          value={newCommentText}
-          onChange={(e) => setNewCommentText(e.target.value)}
-          style={textareaCommentStyle}
-        />
-        <button onClick={handleAddComment} style={{ ...actionButtonStyle, backgroundColor: '#17a2b8' }}>Añadir Comentario</button>
-      </div>
-    </div>
-  );
-};
+            <div className="mb-4">
+                <label htmlFor="description" className="block text-gray-700 text-sm font-bold mb-2">
+                    Descripción:
+                </label>
+                <textarea
+                    id="description"
+                    name="description"
+                    className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                    value={formData.description}
+                    onChange={handleChange}
+                    rows={4}
+                    required
+                    disabled={loading}
+                ></textarea>
+            </div>
 
-// --- Estilos ---
-const containerStyle: React.CSSProperties = {
-  marginTop: '20px',
-  padding: '20px',
-  border: '1px solid #ddd',
-  borderRadius: '8px',
-  backgroundColor: '#f9f9f9',
-  position: 'relative',
-};
+            <div className="mb-4">
+                <label htmlFor="status" className="block text-gray-700 text-sm font-bold mb-2">
+                    Estado:
+                </label>
+                <select
+                    id="status"
+                    name="status"
+                    className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                    value={formData.status}
+                    onChange={handleChange}
+                    required
+                    disabled={loading}
+                >
+                    {Object.entries(ticketStatusTranslations).map(([key, value]) => (
+                        <option key={key} value={key}>{value as string}</option> 
+                    ))}
+                </select>
+            </div>
 
-const closeButtonStyle: React.CSSProperties = {
-  position: 'absolute',
-  top: '10px',
-  right: '10px',
-  padding: '8px 12px',
-  backgroundColor: '#6c757d',
-  color: 'white',
-  border: 'none',
-  borderRadius: '5px',
-  cursor: 'pointer',
-};
+            <div className="mb-4">
+                <label htmlFor="priority" className="block text-gray-700 text-sm font-bold mb-2">
+                    Prioridad:
+                </label>
+                <select
+                    id="priority"
+                    name="priority"
+                    className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                    value={formData.priority}
+                    onChange={handleChange}
+                    required
+                    disabled={loading}
+                >
+                    {Object.entries(ticketPriorityTranslations).map(([key, value]) => (
+                        <option key={key} value={key}>{value as string}</option> 
+                    ))}
+                </select>
+            </div>
 
-const detailGridStyle: React.CSSProperties = {
-  display: 'grid',
-  gridTemplateColumns: '1fr 1fr',
-  gap: '15px',
-  marginTop: '15px',
-};
+            <div className="mb-4">
+                <label htmlFor="department_id" className="block text-gray-700 text-sm font-bold mb-2">
+                    Departamento:
+                </label>
+                <select
+                    id="department_id"
+                    name="department_id"
+                    className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                    value={formData.department_id || ''}
+                    onChange={handleChange}
+                    required
+                    disabled={loading}
+                >
+                    <option value="">Seleccionar Departamento</option>
+                    {departments.map(dept => (
+                        <option key={dept.id} value={dept.id}>{dept.name}</option>
+                    ))}
+                </select>
+            </div>
 
-const inputStyle: React.CSSProperties = {
-  width: 'calc(100% - 10px)',
-  padding: '8px',
-  margin: '5px 0',
-  borderRadius: '4px',
-  border: '1px solid #ccc',
-};
+            <div className="mb-4">
+                <label htmlFor="assigned_to_user_id" className="block text-gray-700 text-sm font-bold mb-2"> 
+                    Agente Asignado:
+                </label>
+                <select
+                    id="assigned_to_user_id"
+                    name="assigned_to_user_id" 
+                    className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                    value={formData.assigned_to_user_id || ''} 
+                    onChange={handleChange}
+                    disabled={loading}
+                >
+                    <option value="">Sin asignar</option>
+                    {agents.map(agent => (
+                        <option key={agent.id} value={agent.id}>{agent.username}</option>
+                    ))}
+                </select>
+            </div>
 
-const textareaStyle: React.CSSProperties = {
-  width: 'calc(100% - 10px)',
-  padding: '8px',
-  margin: '5px 0',
-  borderRadius: '4px',
-  border: '1px solid #ccc',
-  minHeight: '80px',
-  verticalAlign: 'top',
-};
-
-const selectStyle: React.CSSProperties = {
-  width: '100%',
-  padding: '8px',
-  margin: '5px 0',
-  borderRadius: '4px',
-  border: '1px solid #ccc',
-};
-
-const commentsContainerStyle: React.CSSProperties = {
-  borderTop: '1px solid #eee',
-  marginTop: '20px',
-  paddingTop: '15px',
-  maxHeight: '300px',
-  overflowY: 'auto',
-};
-
-const commentStyle: React.CSSProperties = {
-  backgroundColor: '#e9ecef',
-  padding: '10px',
-  borderRadius: '5px',
-  marginBottom: '10px',
-};
-
-const newCommentStyle: React.CSSProperties = {
-  marginTop: '20px',
-  display: 'flex',
-  flexDirection: 'column',
-  gap: '10px',
-};
-
-const textareaCommentStyle: React.CSSProperties = {
-  width: '100%',
-  padding: '10px',
-  borderRadius: '5px',
-  border: '1px solid #ccc',
-  minHeight: '60px',
-};
-
-const actionButtonStyle: React.CSSProperties = {
-  padding: '8px 15px',
-  color: 'white',
-  border: 'none',
-  borderRadius: '5px',
-  cursor: 'pointer',
-  fontSize: '1rem',
+            <div className="flex justify-end gap-3 mt-6">
+                <button
+                    type="button"
+                    onClick={onCancel}
+                    className="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-4 rounded-md transition-colors duration-200"
+                    disabled={loading}
+                >
+                    Cancelar
+                </button>
+                <button
+                    type="submit"
+                    className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-md transition-colors duration-200"
+                    disabled={loading}
+                >
+                    {loading ? 'Guardando...' : 'Guardar Cambios'}
+                </button>
+            </div>
+        </form>
+    );
 };
 
 export default TicketDetailForm;

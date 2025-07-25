@@ -2,6 +2,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import api from '../../config/axiosConfig';
 import { useAuth } from '../../context/AuthContext'; 
+import { useNotification } from '../../context/NotificationContext'; // <-- AÑADIDO: Importar useNotification
 import { User, Department } from '../../types'; // Asegúrate de que User tenga department_id
 import { isAxiosErrorTypeGuard, ApiResponseError } from '../../utils/typeGuards';
 import UserEditModal from './UserEditModal'; 
@@ -12,7 +13,8 @@ interface UsersProps {
 }
 
 const Users: React.FC<UsersProps> = ({ onEditUser }) => { 
-    const { token, addNotification, signOut } = useAuth();
+    const { token, signOut } = useAuth(); // <-- MODIFICADO: Solo token y signOut de useAuth
+    const { addNotification } = useNotification(); // <-- AÑADIDO: addNotification de useNotification
     const [users, setUsers] = useState<User[]>([]);
     const [departments, setDepartments] = useState<Department[]>([]); 
     const [loading, setLoading] = useState(true);

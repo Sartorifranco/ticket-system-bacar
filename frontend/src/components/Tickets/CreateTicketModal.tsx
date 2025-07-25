@@ -3,6 +3,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import ReactDOM from 'react-dom';
 import api from '../../config/axiosConfig';
 import { useAuth } from '../../context/AuthContext';
+import { useNotification } from '../../context/NotificationContext'; // <-- AÑADIDO: Importar useNotification
 import { Department, User } from '../../types';
 import { isAxiosErrorTypeGuard, ApiResponseError } from '../../utils/typeGuards';
 
@@ -23,7 +24,7 @@ const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     departments,
     users,
 }) => {
-    const { addNotification } = useAuth();
+    const { addNotification } = useNotification(); // <-- MODIFICADO: Obtener addNotification del contexto de notificaciones
     // CORREGIDO: Usar 'title' en lugar de 'subject'
     const [title, setTitle] = useState(''); 
     const [description, setDescription] = useState('');
@@ -69,7 +70,7 @@ const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                 description,
                 priority,
                 department_id: departmentId,
-                agent_id: assignedToUserId, // Coincide con el backend (ahora usa assigned_to_user_id)
+                assigned_to_user_id: assignedToUserId, // Coincide con el backend (ahora usa assigned_to_user_id)
             };
 
             await api.post('/api/tickets', ticketData, {

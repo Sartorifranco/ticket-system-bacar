@@ -1,46 +1,56 @@
-// frontend/src/services/userService.ts
 import api from '../config/axiosConfig';
-
-export interface User {
-  id: number;
-  username: string;
-  email: string;
-  role: 'admin' | 'agent' | 'client';
-  created_at: string;
-  updated_at: string;
-}
+import { User, UserRole } from '../types'; 
 
 export interface NewUser {
-  username: string;
-  email: string;
-  password?: string;
-  role: 'admin' | 'agent' | 'client';
+    username: string;
+    email: string;
+    password?: string; 
+    role: UserRole;
+    department_id: number | null; 
+}
+
+export interface UpdateUser {
+    username?: string;
+    email?: string;
+    password?: string;
+    role?: UserRole;
+    department_id?: number | null; 
 }
 
 const userService = {
-  getAllUsers: async (): Promise<User[]> => {
-    const response = await api.get<{ success: boolean; count: number; users: User[] }>('/api/users'); // <-- CAMBIO: /api/users
-    return response.data.users;
-  },
+    getAllUsers: async (token: string): Promise<User[]> => {
+        const response = await api.get('/api/users', {
+            headers: { Authorization: `Bearer ${token}` },
+        });
+        return response.data.users || []; 
+    },
 
-  getUserById: async (id: number): Promise<User> => {
-    const response = await api.get<{ success: boolean; user: User }>(`/api/users/${id}`); // <-- CAMBIO: /api/users/:id
-    return response.data.user;
-  },
+    getUserById: async (token: string, id: number): Promise<User> => {
+        const response = await api.get(`/api/users/${id}`, {
+            headers: { Authorization: `Bearer ${token}` },
+        });
+        return response.data;
+    },
 
-  createUser: async (userData: NewUser): Promise<User> => {
-    const response = await api.post<{ success: boolean; message: string; user: User }>('/api/users', userData); // <-- CAMBIO: /api/users
-    return response.data.user;
-  },
+    createUser: async (token: string, user: NewUser): Promise<User> => {
+        const response = await api.post('/api/users', user, {
+            headers: { Authorization: `Bearer ${token}` },
+        });
+        return response.data;
+    },
 
-  updateUser: async (id: number, userData: Partial<NewUser>): Promise<User> => {
-    const response = await api.put<{ success: boolean; message: string; user: User }>(`/api/users/${id}`, userData); // <-- CAMBIO: /api/users/:id
-    return response.data.user;
-  },
+    updateUser: async (token: string, id: number, user: UpdateUser): Promise<User> => {
+        const response = await api.put(`/api/users/${id}`, user, {
+            headers: { Authorization: `Bearer ${token}` },
+        });
+        return response.data;
+    },
 
-  deleteUser: async (id: number): Promise<void> => {
-    await api.delete<{ success: boolean; message: string }>(`/api/users/${id}`); // <-- CAMBIO: /api/users/:id
-  }
+    deleteUser: async (token: string, id: number): Promise<void> => {
+        await api.delete(`/api/users/${id}`, {
+            headers: { Authorization: `Bearer ${token}` },
+        });
+    },
 };
 
 export default userService;

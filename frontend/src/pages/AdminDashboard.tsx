@@ -1,6 +1,5 @@
 // frontend/src/pages/AdminDashboard.tsx
-<<<<<<< HEAD
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import {
     PieChart, Pie, Cell, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
@@ -19,17 +18,18 @@ import BacarKeys from '../components/BacarKeys/BacarKeys';
 
 import Users from '../components/Users/Users';
 import Departments from '../components/Departments/Departments'; 
-// ELIMINADA: La importación de TicketsList (que era TicketDetail) ya que no es un componente de lista.
-// Si necesitas una lista de tickets aquí, deberás crear un componente TicketsList.tsx dedicado.
+import Tickets from '../components/Tickets/Tickets'; // Importar el nuevo componente Tickets
 
 import ActivityLogs from '../components/System/ActivityLogDashboard'; 
 import Reports from '../components/Dashboard/ReportsDashboard'; 
 
 import { ticketStatusTranslations, ticketPriorityTranslations, userRoleTranslations, targetTypeTranslations, translateTerm } from '../utils/traslations';
 import { useAuth } from '../context/AuthContext';
+import { useNotification } from '../context/NotificationContext';
 
 const AdminDashboard: React.FC = () => { 
-    const { user, token, addNotification, signOut } = useAuth();
+    const { user, token, signOut } = useAuth();
+    const { addNotification } = useNotification();
     const navigate = useNavigate();
     const location = useLocation();
     const queryParams = new URLSearchParams(location.search);
@@ -44,7 +44,8 @@ const AdminDashboard: React.FC = () => {
     const [recentTickets, setRecentTickets] = useState<TicketData[]>([]);
     const [notifications, setNotifications] = useState<Notification[]>([]); 
 
-    // Estados para modales
+    // Estados para modales (estos modales ahora serán controlados por los componentes Tickets y Users/Departments)
+    // Se mantienen aquí solo si AdminDashboard necesita abrirlos desde el overview o pasarlos a otros componentes.
     const [isTicketDetailModalOpen, setIsTicketDetailModalOpen] = useState(false);
     const [selectedTicket, setSelectedTicket] = useState<TicketData | null>(null);
     const [isCreateTicketModalOpen, setIsCreateTicketModalOpen] = useState(false);
@@ -59,22 +60,24 @@ const AdminDashboard: React.FC = () => {
     const [allUsers, setAllUsers] = useState<User[]>([]);
     const [allDepartments, setAllDepartments] = useState<Department[]>([]);
 
+    const activeTabRef = useRef(activeTab);
 
-    // Efecto para cambiar la pestaña activa según la URL
+    useEffect(() => {
+        activeTabRef.current = activeTab;
+    }, [activeTab]);
+
     useEffect(() => {
         const tab = queryParams.get('tab');
         if (tab) {
             setActiveTab(tab);
         }
-    }, [location.search]);
+    }, [location.search, queryParams]); 
 
-    // Función para cambiar de pestaña y actualizar la URL
     const handleTabChange = useCallback((tabName: string) => {
         setActiveTab(tabName);
         navigate(`?tab=${tabName}`);
     }, [navigate]);
 
-    // Función para obtener métricas del dashboard
     const fetchDashboardMetrics = useCallback(async () => {
         setLoading(true);
         setError(null);
@@ -91,6 +94,7 @@ const AdminDashboard: React.FC = () => {
                 const apiError = err.response?.data as ApiResponseError;
                 setError(apiError?.message || 'Error al cargar métricas del dashboard.');
                 addNotification(`Error al cargar métricas: ${apiError?.message || 'Error desconocido'}`, 'error');
+                // Corrección: Usar apiError.status en lugar de err.response?.status
                 if (err.response?.status === 401) signOut(); 
             } else {
                 setError('Ocurrió un error inesperado al cargar las métricas.');
@@ -101,7 +105,6 @@ const AdminDashboard: React.FC = () => {
         }
     }, [token, addNotification, signOut]);
 
-    // Función para obtener actividades recientes
     const fetchRecentActivities = useCallback(async () => {
         setLoading(true);
         setError(null);
@@ -118,6 +121,7 @@ const AdminDashboard: React.FC = () => {
                 const apiError = err.response?.data as ApiResponseError;
                 setError(apiError?.message || 'Error al cargar actividades recientes.');
                 addNotification(`Error al cargar actividades: ${apiError?.message || 'Error desconocido'}`, 'error');
+                // Corrección: Usar apiError.status en lugar de err.response?.status
                 if (err.response?.status === 401) signOut();
             } else {
                 setError('Ocurrió un error inesperado al cargar las actividades.');
@@ -128,7 +132,6 @@ const AdminDashboard: React.FC = () => {
         }
     }, [token, addNotification, signOut]);
 
-    // Función para obtener tickets recientes (ej. los 5 últimos tickets abiertos/en progreso)
     const fetchRecentTickets = useCallback(async () => {
         setLoading(true);
         setError(null);
@@ -148,6 +151,7 @@ const AdminDashboard: React.FC = () => {
                 const apiError = err.response?.data as ApiResponseError;
                 setError(apiError?.message || 'Error al cargar tickets recientes.');
                 addNotification(`Error al cargar tickets: ${apiError?.message || 'Error desconocido'}`, 'error');
+                // Corrección: Usar apiError.status en lugar de err.response?.status
                 if (err.response?.status === 401) signOut();
             } else {
                 setError('Ocurrió un error inesperado al cargar los tickets.');
@@ -159,7 +163,6 @@ const AdminDashboard: React.FC = () => {
         }
     }, [token, addNotification, signOut]);
 
-    // Función para obtener notificaciones para la pestaña de notificaciones
     const fetchNotifications = useCallback(async () => {
         setLoading(true);
         setError(null);
@@ -176,6 +179,7 @@ const AdminDashboard: React.FC = () => {
                 const apiError = err.response?.data as ApiResponseError;
                 setError(apiError?.message || 'Error al cargar notificaciones.');
                 addNotification(`Error al cargar notificaciones: ${apiError?.message || 'Error desconocido'}`, 'error');
+                // Corrección: Usar apiError.status en lugar de err.response?.status
                 if (err.response?.status === 401) signOut();
             } else {
                 setError('Ocurrió un error inesperado al cargar las notificaciones.');
@@ -187,7 +191,6 @@ const AdminDashboard: React.FC = () => {
         }
     }, [token, addNotification, signOut]);
 
-    // Función para obtener todos los usuarios y departamentos (para pasar a modales)
     const fetchUsersAndDepartments = useCallback(async () => {
         try {
             if (!token) return;
@@ -195,14 +198,16 @@ const AdminDashboard: React.FC = () => {
                 api.get('/api/users', { headers: { Authorization: `Bearer ${token}` } }),
                 api.get('/api/departments', { headers: { Authorization: `Bearer ${token}` } }),
             ]);
-            setAllUsers(usersRes.data || []); 
+            setAllUsers(usersRes.data.users || []); 
             setAllDepartments(departmentsRes.data.departments || []);
         } catch (err: unknown) {
             console.error('Error fetching users or departments for modals:', err);
+            if (isAxiosErrorTypeGuard(err) && err.response?.status === 401) {
+                signOut();
+            }
         }
-    }, [token]);
+    }, [token, signOut]);
 
-    // Función para marcar una notificación como leída
     const handleMarkNotificationAsRead = useCallback(async (notificationId: number) => {
         try {
             if (!token) {
@@ -225,7 +230,6 @@ const AdminDashboard: React.FC = () => {
         }
     }, [token, addNotification, fetchNotifications]);
 
-    // Función para eliminar una notificación
     const handleDeleteNotification = useCallback(async (notificationId: number) => {
         const confirmed = window.confirm('¿Estás seguro de que quieres eliminar esta notificación?'); 
         if (!confirmed) return;
@@ -252,7 +256,6 @@ const AdminDashboard: React.FC = () => {
     }, [token, addNotification, fetchNotifications]);
 
 
-    // Efecto para cargar datos al cambiar de pestaña y al montar
     useEffect(() => {
         if (user?.role !== 'admin') {
             addNotification('Acceso denegado. Solo administradores pueden acceder a este panel.', 'error');
@@ -260,7 +263,7 @@ const AdminDashboard: React.FC = () => {
             return;
         }
 
-        fetchUsersAndDepartments();
+        fetchUsersAndDepartments(); 
 
         switch (activeTab) {
             case 'overview':
@@ -269,25 +272,25 @@ const AdminDashboard: React.FC = () => {
                 fetchRecentTickets(); 
                 break;
             case 'users':
-                // No es necesario fetchUsers aquí, el componente Users ya lo hace
+                // Data for 'users' tab is fetched by the Users component itself
                 break;
             case 'tickets':
-                // No es necesario fetchTickets aquí, el componente TicketsList (si existiera) lo haría
+                // Data for 'tickets' tab will now be fetched by the Tickets component itself
                 break;
             case 'departments':
-                // No es necesario fetchDepartments aquí, el componente Departments ya lo hace
+                // Data for 'departments' tab is fetched by the Departments component itself
                 break;
             case 'activityLogs':
-                // No es necesario fetchActivityLogs aquí, el componente ActivityLogs ya lo hace
+                // Data for 'activityLogs' tab is fetched by the ActivityLogs component itself
                 break;
             case 'reports':
-                // No es necesario fetchReports aquí, el componente Reports ya lo hace
+                // Data for 'reports' tab is fetched by the Reports component itself
                 break;
             case 'notifications':
                 fetchNotifications(); 
                 break;
             case 'bacarKeys':
-                // No es necesario fetchBacarKeys aquí, el componente BacarKeys ya lo hace
+                // Data for 'bacarKeys' tab is fetched by the BacarKeys component itself
                 break;
             default:
                 break;
@@ -295,7 +298,8 @@ const AdminDashboard: React.FC = () => {
     }, [activeTab, user, navigate, addNotification, fetchDashboardMetrics, fetchRecentActivities, fetchRecentTickets, fetchNotifications, fetchUsersAndDepartments]);
 
 
-    // Funciones para modales de Tickets
+    // Funciones para modales de Tickets (estos ahora son manejados por el componente Tickets.tsx)
+    // Se mantienen aquí si el overview necesita abrirlos, pero el componente Tickets.tsx manejará su propia creación/edición
     const handleViewTicket = useCallback((ticket: TicketData) => {
         setSelectedTicket(ticket);
         setIsTicketDetailModalOpen(true);
@@ -312,11 +316,14 @@ const AdminDashboard: React.FC = () => {
 
     const handleTicketCreatedOrUpdated = useCallback(() => {
         setIsCreateTicketModalOpen(false);
+        const tabBeforeChange = activeTabRef.current; 
         handleTabChange('tickets'); 
-        if (activeTab === 'overview') {
+        
+        if (tabBeforeChange === 'overview') {
             fetchRecentTickets();
         }
-    }, [handleTabChange, activeTab, fetchRecentTickets]);
+    }, [handleTabChange, fetchRecentTickets]);
+
 
     // Funciones para modales de Usuarios
     const handleEditUser = useCallback((user: User | null) => {
@@ -331,6 +338,7 @@ const AdminDashboard: React.FC = () => {
 
     const handleUserUpdated = useCallback(() => {
         handleCloseUserEditModal();
+        // El componente Users se re-renderizará y re-fetch al cambiar de pestaña
     }, [handleCloseUserEditModal]);
 
     // Funciones para modales de Departamentos
@@ -346,10 +354,10 @@ const AdminDashboard: React.FC = () => {
 
     const handleDepartmentUpdated = useCallback(() => {
         handleCloseDepartmentEditModal();
+        // El componente Departments se re-renderizará y re-fetch al cambiar de pestaña
     }, [handleCloseDepartmentEditModal]);
 
 
-    // Datos para los gráficos de Recharts (ejemplo, adaptados de las métricas)
     const ticketsByStatusData = useMemo(() => {
         return metrics?.ticketsByStatus?.map(item => ({
             name: translateTerm(item.name, 'status'),
@@ -373,148 +381,155 @@ const AdminDashboard: React.FC = () => {
     }, [metrics]);
 
     const agentPerformanceData = useMemo(() => {
-        return metrics?.agentPerformance || [];
+        return metrics?.agentPerformance?.map(agent => ({
+            agentName: agent.agentName,
+            resolvedTickets: agent.resolvedTickets,
+            avgResolutionTimeHours: agent.avgResolutionTimeHours
+        })) || [];
     }, [metrics]);
 
     const departmentPerformanceData = useMemo(() => {
-        return metrics?.departmentPerformance || [];
+        return metrics?.departmentPerformance?.map(dept => ({
+            departmentName: dept.departmentName,
+            totalTickets: dept.totalTickets,
+            avgResolutionTimeHours: dept.avgResolutionTimeHours
+        })) || [];
     }, [metrics]);
 
 
-    // Colores para los gráficos Pie
     const PIE_COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#A28DFF', '#FF6B6B'];
 
 
     if (loading && activeTab === 'overview') {
         return (
-            <div className="flex justify-center items-center h-screen bg-background-color">
-                <p className="text-primary-color text-lg">Cargando dashboard...</p>
+            <div className="flex justify-center items-center h-screen bg-gray-100 text-gray-700">
+                <p className="text-lg">Cargando dashboard...</p>
             </div>
         );
     }
 
     if (error && activeTab === 'overview') {
         return (
-            <div className="text-center p-8 text-red-500 bg-card-background rounded-lg shadow-lg m-4">
+            <div className="text-center p-8 text-red-500 bg-white rounded-lg shadow-lg m-4">
                 <h2 className="text-2xl font-bold mb-4">Error al cargar el Dashboard</h2>
                 <p>{error}</p>
-                <button onClick={() => window.location.reload()} className="button primary-button mt-4">Recargar</button>
+                <button onClick={() => window.location.reload()} className="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded mt-4">Recargar</button>
             </div>
         );
     }
 
-    if (user?.role !== 'admin') {
+    if (!user || user.role !== 'admin') {
         return null; 
     }
 
     return (
-        <div className="admin-dashboard p-4 md:p-8 bg-background-color min-h-screen flex flex-col md:flex-row gap-6">
-            <h1 className="text-3xl font-bold text-primary-color mb-8 text-center md:hidden">Panel de Administración</h1>
+        <div className="admin-dashboard p-4 md:p-8 bg-gray-100 min-h-screen flex flex-col md:flex-row gap-6">
+            <h1 className="text-3xl font-bold text-gray-800 mb-8 text-center md:hidden">Panel de Administración</h1>
 
-            <div className="tabs-sidebar bg-card-background p-4 rounded-lg shadow-lg md:w-64 w-full flex flex-row md:flex-col gap-2 overflow-x-auto md:overflow-x-hidden">
-                <h2 className="text-2xl font-bold text-primary-color mb-4 hidden md:block">Navegación</h2> 
+            <div className="tabs-sidebar bg-white p-4 rounded-lg shadow-lg md:w-64 w-full flex flex-row md:flex-col gap-2 overflow-x-auto md:overflow-x-hidden">
+                <h2 className="text-2xl font-bold text-gray-800 mb-4 hidden md:block">Navegación</h2> 
                 
                 <button className={`
                     px-4 py-2 rounded-lg font-semibold transition-colors duration-200 text-left w-full
                     ${activeTab === 'overview' 
-                      ? 'bg-[#800020] text-white shadow-md' 
-                      : 'bg-transparent text-text-light hover:bg-hover-background hover:text-primary-color'}
+                      ? 'bg-red-700 text-white shadow-md' 
+                      : 'bg-transparent text-gray-700 hover:bg-gray-200 hover:text-gray-900'}
                   `} onClick={() => handleTabChange('overview')}>
                     Resumen
                 </button>
                 <button className={`
                     px-4 py-2 rounded-lg font-semibold transition-colors duration-200 text-left w-full
                     ${activeTab === 'users' 
-                      ? 'bg-[#800020] text-white shadow-md' 
-                      : 'bg-transparent text-text-light hover:bg-hover-background hover:text-primary-color'}
+                      ? 'bg-red-700 text-white shadow-md' 
+                      : 'bg-transparent text-gray-700 hover:bg-gray-200 hover:text-gray-900'}
                   `} onClick={() => handleTabChange('users')}>
                     Usuarios
                 </button>
                 <button className={`
                     px-4 py-2 rounded-lg font-semibold transition-colors duration-200 text-left w-full
                     ${activeTab === 'tickets' 
-                      ? 'bg-[#800020] text-white shadow-md' 
-                      : 'bg-transparent text-text-light hover:bg-hover-background hover:text-primary-color'}
+                      ? 'bg-red-700 text-white shadow-md' 
+                      : 'bg-transparent text-gray-700 hover:bg-gray-200 hover:text-gray-900'}
                   `} onClick={() => handleTabChange('tickets')}>
                     Tickets
                 </button>
                 <button className={`
                     px-4 py-2 rounded-lg font-semibold transition-colors duration-200 text-left w-full
                     ${activeTab === 'departments' 
-                      ? 'bg-[#800020] text-white shadow-md' 
-                      : 'bg-transparent text-text-light hover:bg-hover-background hover:text-primary-color'}
+                      ? 'bg-red-700 text-white shadow-md' 
+                      : 'bg-transparent text-gray-700 hover:bg-gray-200 hover:text-gray-900'}
                   `} onClick={() => handleTabChange('departments')}>
                     Departamentos
                 </button>
                 <button className={`
                     px-4 py-2 rounded-lg font-semibold transition-colors duration-200 text-left w-full
                     ${activeTab === 'activityLogs' 
-                      ? 'bg-[#800020] text-white shadow-md' 
-                      : 'bg-transparent text-text-light hover:bg-hover-background hover:text-primary-color'}
+                      ? 'bg-red-700 text-white shadow-md' 
+                      : 'bg-transparent text-gray-700 hover:bg-gray-200 hover:text-gray-900'}
                   `} onClick={() => handleTabChange('activityLogs')}>
                     Registro de Actividad
                 </button>
                 <button className={`
                     px-4 py-2 rounded-lg font-semibold transition-colors duration-200 text-left w-full
                     ${activeTab === 'reports' 
-                      ? 'bg-[#800020] text-white shadow-md' 
-                      : 'bg-transparent text-text-light hover:bg-hover-background hover:text-primary-color'}
+                      ? 'bg-red-700 text-white shadow-md' 
+                      : 'bg-transparent text-gray-700 hover:bg-gray-200 hover:text-gray-900'}
                   `} onClick={() => handleTabChange('reports')}>
                     Informes
                 </button>
                 <button className={`
                     px-4 py-2 rounded-lg font-semibold transition-colors duration-200 text-left w-full
                     ${activeTab === 'notifications' 
-                      ? 'bg-[#800020] text-white shadow-md' 
-                      : 'bg-transparent text-text-light hover:bg-hover-background hover:text-primary-color'}
+                      ? 'bg-red-700 text-white shadow-md' 
+                      : 'bg-transparent text-gray-700 hover:bg-gray-200 hover:text-gray-900'}
                   `} onClick={() => handleTabChange('notifications')}>
                     Notificaciones
                 </button>
                 <button className={`
                     px-4 py-2 rounded-lg font-semibold transition-colors duration-200 text-left w-full
                     ${activeTab === 'bacarKeys' 
-                      ? 'bg-[#800020] text-white shadow-md' 
-                      : 'bg-transparent text-text-light hover:bg-hover-background hover:text-primary-color'}
+                      ? 'bg-red-700 text-white shadow-md' 
+                      : 'bg-transparent text-gray-700 hover:bg-gray-200 hover:text-gray-900'}
                   `} onClick={() => handleTabChange('bacarKeys')}>
                     Claves Bacar
                 </button>
             </div>
 
-            <div className="tab-content bg-card-background p-6 rounded-lg shadow-lg flex-1 w-full">
-                <h1 className="text-3xl font-bold text-primary-color mb-8 text-center hidden md:block">Panel de Administración</h1>
+            <div className="tab-content bg-white p-6 rounded-lg shadow-lg flex-1 w-full">
+                <h1 className="text-3xl font-bold text-gray-800 mb-8 text-center hidden md:block">Panel de Administración</h1>
 
                 {activeTab === 'overview' && metrics && (
                     <div className="overview-grid grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                         {/* Tarjetas de métricas */}
-                        <div className="metric-card bg-secondary-background p-4 rounded-lg shadow-sm">
-                            <h3 className="text-lg font-semibold text-text-light dark:text-text-dark">Total Tickets</h3>
-                            <p className="text-3xl font-bold text-primary-color">{metrics.totalTickets}</p>
+                        <div className="metric-card bg-gray-50 p-4 rounded-lg shadow-sm">
+                            <h3 className="text-lg font-semibold text-gray-700">Total Tickets</h3>
+                            <p className="text-3xl font-bold text-blue-600">{metrics.totalTickets}</p>
                         </div>
-                        <div className="metric-card bg-secondary-background p-4 rounded-lg shadow-sm">
-                            <h3 className="text-lg font-semibold text-text-light dark:text-text-dark">Tickets Abiertos</h3>
-                            <p className="text-3xl font-bold text-green-500">{metrics.openTickets}</p>
+                        <div className="metric-card bg-gray-50 p-4 rounded-lg shadow-sm">
+                            <h3 className="text-lg font-semibold text-gray-700">Tickets Abiertos</h3>
+                            <p className="text-3xl font-bold text-green-600">{metrics.openTickets}</p>
                         </div>
-                        <div className="metric-card bg-secondary-background p-4 rounded-lg shadow-sm">
-                            <h3 className="text-lg font-semibold text-text-light dark:text-text-dark">Tickets Cerrados</h3>
-                            <p className="text-3xl font-bold text-blue-500">{metrics.closedTickets}</p>
+                        <div className="metric-card bg-gray-50 p-4 rounded-lg shadow-sm">
+                            <h3 className="text-lg font-semibold text-gray-700">Tickets Cerrados</h3>
+                            <p className="text-3xl font-bold text-gray-600">{metrics.closedTickets}</p>
                         </div>
-                        <div className="metric-card bg-secondary-background p-4 rounded-lg shadow-sm">
-                            <h3 className="text-lg font-semibold text-text-light dark:text-text-dark">Total Usuarios</h3>
-                            <p className="text-3xl font-bold text-purple-500">{metrics.totalUsers}</p>
+                        <div className="metric-card bg-gray-50 p-4 rounded-lg shadow-sm">
+                            <h3 className="text-lg font-semibold text-gray-700">Total Usuarios</h3>
+                            <p className="text-3xl font-bold text-purple-600">{metrics.totalUsers}</p>
                         </div>
-                        <div className="metric-card bg-secondary-background p-4 rounded-lg shadow-sm">
-                            <h3 className="text-lg font-semibold text-text-light dark:text-text-dark">Total Departamentos</h3>
-                            <p className="text-3xl font-bold text-orange-500">{metrics.totalDepartments}</p>
+                        <div className="metric-card bg-gray-50 p-4 rounded-lg shadow-sm">
+                            <h3 className="text-lg font-semibold text-gray-700">Total Departamentos</h3>
+                            <p className="text-3xl font-bold text-orange-600">{metrics.totalDepartments}</p>
                         </div>
 
                         {/* Actividad Reciente */}
-                        <div className="col-span-1 md:col-span-2 lg:col-span-3 bg-secondary-background p-4 rounded-lg shadow-sm">
-                            <h3 className="text-xl font-semibold text-text-light dark:text-text-dark mb-4">Actividad Reciente</h3>
+                        <div className="col-span-1 md:col-span-2 lg:col-span-3 bg-gray-50 p-4 rounded-lg shadow-sm">
+                            <h3 className="text-xl font-semibold text-gray-800 mb-4">Actividad Reciente</h3>
                             {recentActivities.length > 0 ? (
                                 <ul className="space-y-2">
                                     {recentActivities.map(activity => (
-                                        <li key={activity.id} className="border-b border-border-color pb-2 last:border-b-0">
-                                            <p className="text-text-light dark:text-text-dark">
+                                        <li key={activity.id} className="border-b border-gray-200 pb-2 last:border-b-0">
+                                            <p className="text-gray-700">
                                                 <span className="font-medium">{activity.user_username || 'Sistema'}</span>{' '}
                                                 {activity.description}
                                                 <span className="text-sm text-gray-500 ml-2">
@@ -525,50 +540,72 @@ const AdminDashboard: React.FC = () => {
                                     ))}
                                 </ul>
                             ) : (
-                                <p className="text-text-light dark:text-text-dark">No hay actividad reciente.</p>
+                                <p className="text-gray-700">No hay actividad reciente.</p>
                             )}
                         </div>
 
                         {/* Tickets Recientes */}
-                        <div className="col-span-1 md:col-span-2 lg:col-span-3 bg-secondary-background p-4 rounded-lg shadow-sm">
-                            <h3 className="text-xl font-semibold text-text-light dark:text-text-dark mb-4">Tickets Recientes (Abiertos/En Progreso)</h3>
+                        <div className="col-span-1 md:col-span-2 lg:col-span-3 bg-gray-50 p-4 rounded-lg shadow-sm">
+                            <h3 className="text-xl font-semibold text-gray-800 mb-4">Tickets Recientes (Abiertos/En Progreso)</h3>
                             {recentTickets.length > 0 ? (
-                                <div className="table-responsive">
-                                    <table className="data-table">
-                                        <thead>
+                                <div className="overflow-x-auto">
+                                    <table className="min-w-full divide-y divide-gray-200">
+                                        <thead className="bg-gray-100">
                                             <tr>
-                                                <th>ID</th>
-                                                <th>Asunto</th>
-                                                <th>Estado</th>
-                                                <th>Prioridad</th>
-                                                <th>Creador</th>
-                                                <th>Asignado a</th>
+                                                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">ID</th>
+                                                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Asunto</th>
+                                                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Estado</th>
+                                                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Prioridad</th>
+                                                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Creador</th>
+                                                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Asignado a</th>
                                             </tr>
                                         </thead>
-                                        <tbody>
+                                        <tbody className="bg-white divide-y divide-gray-200">
                                             {recentTickets.map(ticket => (
                                                 <tr key={ticket.id}>
-                                                    <td>{ticket.id}</td>
-                                                    <td><Link to={`/tickets/${ticket.id}`} className="text-primary-color hover:underline">{ticket.title}</Link></td> 
-                                                    <td><span className={`status-badge status-${ticket.status}`}>{ticketStatusTranslations[ticket.status]}</span></td>
-                                                    <td><span className={`priority-badge priority-${ticket.priority}`}>{ticketPriorityTranslations[ticket.priority]}</span></td>
-                                                    <td>{ticket.user_username}</td>
-                                                    <td>{ticket.agent_username || 'N/A'}</td>
+                                                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{ticket.id}</td>
+                                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                                        {/* MODIFICADO: Cambiado a onClick para abrir el modal */}
+                                                        <button onClick={() => handleViewTicket(ticket)} className="text-indigo-600 hover:text-indigo-900">
+                                                            {ticket.title}
+                                                        </button>
+                                                    </td> 
+                                                    <td className="px-6 py-4 whitespace-nowrap text-sm">
+                                                        <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full 
+                                                            ${ticket.status === 'open' ? 'bg-blue-100 text-blue-800' : ''}
+                                                            ${ticket.status === 'in-progress' ? 'bg-yellow-100 text-yellow-800' : ''}
+                                                            ${ticket.status === 'resolved' ? 'bg-green-100 text-green-800' : ''}
+                                                            ${ticket.status === 'closed' ? 'bg-gray-100 text-gray-800' : ''}
+                                                        `}>
+                                                            {ticketStatusTranslations[ticket.status] || ticket.status}
+                                                        </span>
+                                                    </td>
+                                                    <td className="px-6 py-4 whitespace-nowrap text-sm">
+                                                        <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full 
+                                                            ${ticket.priority === 'low' ? 'bg-green-100 text-green-800' : ''}
+                                                            ${ticket.priority === 'medium' ? 'bg-yellow-100 text-yellow-800' : ''}
+                                                            ${ticket.priority === 'high' ? 'bg-red-100 text-red-800' : ''}
+                                                        `}>
+                                                            {ticketPriorityTranslations[ticket.priority] || ticket.priority}
+                                                        </span>
+                                                    </td>
+                                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{ticket.user_username}</td>
+                                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{ticket.agent_username || 'N/A'}</td>
                                                 </tr>
                                             ))}
                                         </tbody>
                                     </table>
                                 </div>
                             ) : (
-                                <p className="text-text-light dark:text-text-dark">No hay tickets recientes.</p>
+                                <p className="text-gray-700">No hay tickets recientes.</p>
                             )}
                         </div>
 
                         {/* Gráficos de Recharts */}
                         <div className="col-span-1 md:col-span-2 lg:col-span-3 grid grid-cols-1 md:grid-cols-2 gap-6 mt-6">
                             {/* Tickets por Estado (Pie Chart) */}
-                            <div className="bg-secondary-background p-4 rounded-lg shadow-sm">
-                                <h3 className="text-xl font-semibold text-text-light dark:text-text-dark mb-4 text-center">Tickets por Estado</h3>
+                            <div className="bg-gray-50 p-4 rounded-lg shadow-sm">
+                                <h3 className="text-xl font-semibold text-gray-800 mb-4 text-center">Tickets por Estado</h3>
                                 <ResponsiveContainer width="100%" height={300}>
                                     <PieChart>
                                         <Pie
@@ -593,8 +630,8 @@ const AdminDashboard: React.FC = () => {
                             </div>
 
                             {/* Tickets por Prioridad (Pie Chart) */}
-                            <div className="bg-secondary-background p-4 rounded-lg shadow-sm">
-                                <h3 className="text-xl font-semibold text-text-light dark:text-text-dark mb-4 text-center">Tickets por Prioridad</h3>
+                            <div className="bg-gray-50 p-4 rounded-lg shadow-sm">
+                                <h3 className="text-xl font-semibold text-gray-800 mb-4 text-center">Tickets por Prioridad</h3>
                                 <ResponsiveContainer width="100%" height={300}>
                                     <PieChart>
                                         <Pie
@@ -619,8 +656,8 @@ const AdminDashboard: React.FC = () => {
                             </div>
 
                             {/* Tickets por Estado a lo largo del tiempo (Line Chart) */}
-                            <div className="col-span-full bg-secondary-background p-4 rounded-lg shadow-sm">
-                                <h3 className="text-xl font-semibold text-text-light dark:text-text-dark mb-4 text-center">Tickets por Estado (Tendencia)</h3>
+                            <div className="col-span-full bg-gray-50 p-4 rounded-lg shadow-sm">
+                                <h3 className="text-xl font-semibold text-gray-800 mb-4 text-center">Tickets por Estado (Tendencia)</h3>
                                 <ResponsiveContainer width="100%" height={300}>
                                     <LineChart data={ticketsByStatusOverTimeData} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
                                         <CartesianGrid strokeDasharray="3 3" stroke="#ccc" />
@@ -637,8 +674,8 @@ const AdminDashboard: React.FC = () => {
                             </div>
 
                             {/* Tickets por Prioridad a lo largo del tiempo (Line Chart) */}
-                            <div className="col-span-full bg-secondary-background p-4 rounded-lg shadow-sm">
-                                <h3 className="text-xl font-semibold text-text-light dark:text-text-dark mb-4 text-center">Tickets por Prioridad (Tendencia)</h3>
+                            <div className="col-span-full bg-gray-50 p-4 rounded-lg shadow-sm">
+                                <h3 className="text-xl font-semibold text-gray-800 mb-4 text-center">Tickets por Prioridad (Tendencia)</h3>
                                 <ResponsiveContainer width="100%" height={300}>
                                     <LineChart data={ticketsByPriorityOverTimeData} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
                                         <CartesianGrid strokeDasharray="3 3" stroke="#ccc" />
@@ -655,8 +692,8 @@ const AdminDashboard: React.FC = () => {
                             </div>
 
                             {/* Rendimiento de Agentes (Bar Chart) */}
-                            <div className="col-span-full bg-secondary-background p-4 rounded-lg shadow-sm">
-                                <h3 className="text-xl font-semibold text-text-light dark:text-text-dark mb-4 text-center">Rendimiento de Agentes</h3>
+                            <div className="col-span-full bg-gray-50 p-4 rounded-lg shadow-sm">
+                                <h3 className="text-xl font-semibold text-gray-800 mb-4 text-center">Rendimiento de Agentes</h3>
                                 <ResponsiveContainer width="100%" height={300}>
                                     <BarChart data={agentPerformanceData} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
                                         <CartesianGrid strokeDasharray="3 3" stroke="#ccc" />
@@ -671,8 +708,8 @@ const AdminDashboard: React.FC = () => {
                             </div>
 
                             {/* Rendimiento de Departamentos (Bar Chart) */}
-                            <div className="col-span-full bg-secondary-background p-4 rounded-lg shadow-sm">
-                                <h3 className="text-xl font-semibold text-text-light dark:text-text-dark mb-4 text-center">Rendimiento de Departamentos</h3>
+                            <div className="col-span-full bg-gray-50 p-4 rounded-lg shadow-sm">
+                                <h3 className="text-xl font-semibold text-gray-800 mb-4 text-center">Rendimiento de Departamentos</h3>
                                 <ResponsiveContainer width="100%" height={300}>
                                     <BarChart data={departmentPerformanceData} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
                                         <CartesianGrid strokeDasharray="3 3" stroke="#ccc" />
@@ -706,11 +743,10 @@ const AdminDashboard: React.FC = () => {
                 )}
                 {activeTab === 'tickets' && (
                     <>
-                        <h2 className="text-xl font-bold text-primary-color mb-4">Lista de Tickets</h2>
-                        <p className="info-text mb-4">Aquí se mostraría una lista completa de tickets. Actualmente, los tickets recientes se muestran en la pestaña "Resumen".</p>
-                        {/* Aquí iría el componente TicketsList si tuvieras uno dedicado. */}
-                        {/* <TicketsList onEditTicket={handleViewTicket} /> */} 
-
+                        {/* MODIFICADO: Ahora renderiza el componente Tickets */}
+                        <Tickets /> 
+                        {/* Los modales de ticket ahora son controlados por el componente Tickets.tsx */}
+                        {/* Se pueden eliminar de aquí si ya no se abren directamente desde AdminDashboard */}
                         {isTicketDetailModalOpen && selectedTicket && (
                             <TicketDetailModal
                                 isOpen={isTicketDetailModalOpen}
@@ -720,7 +756,11 @@ const AdminDashboard: React.FC = () => {
                                 departments={allDepartments} 
                                 users={allUsers} 
                                 onTicketUpdated={() => {
-                                    handleTabChange('tickets');
+                                    handleCloseTicketDetailModal(); 
+                                    const tabBeforeChange = activeTabRef.current; 
+                                    if (tabBeforeChange === 'overview') {
+                                        fetchRecentTickets(); 
+                                    }
                                 }}
                             />
                         )}
@@ -734,11 +774,12 @@ const AdminDashboard: React.FC = () => {
                                 users={allUsers} 
                             />
                         )}
-                        <div className="flex justify-end mt-4">
-                            <button onClick={handleCreateTicket} className="button primary-button">
+                        {/* El botón de crear ticket también se moverá dentro de Tickets.tsx */}
+                        {/* <div className="flex justify-end mt-4">
+                            <button onClick={handleCreateTicket} className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-md transition-colors duration-200">
                                 Crear Nuevo Ticket
                             </button>
-                        </div>
+                        </div> */}
                     </>
                 )}
                 {activeTab === 'departments' && (
@@ -761,17 +802,17 @@ const AdminDashboard: React.FC = () => {
                 
                 {activeTab === 'notifications' && (
                     <div className="notifications-list">
-                        <h2 className="text-2xl font-bold text-primary-color mb-4 text-center">Gestión de Notificaciones</h2>
-                        <p className="info-text text-center mb-6">Visualiza y gestiona las notificaciones del sistema.</p>
+                        <h2 className="text-2xl font-bold text-gray-800 mb-4 text-center">Gestión de Notificaciones</h2>
+                        <p className="text-gray-700 text-center mb-6">Visualiza y gestiona las notificaciones del sistema.</p>
 
                         {loading ? (
-                            <div className="loading-message">🔄 Cargando notificaciones...</div>
+                            <div className="text-center py-4 text-gray-600">🔄 Cargando notificaciones...</div>
                         ) : notifications.length > 0 ? (
                             <div className="space-y-4">
                                 {notifications.map((notification) => (
-                                    <div key={notification.id} className="bg-secondary-background p-4 rounded-lg shadow-sm flex items-center justify-between">
+                                    <div key={notification.id} className="bg-gray-50 p-4 rounded-lg shadow-sm flex items-center justify-between">
                                         <div>
-                                            <p className="text-text-light dark:text-text-dark">{notification.message}</p>
+                                            <p className="text-gray-700">{notification.message}</p>
                                             <p className="text-sm text-gray-500">
                                                 {new Date(notification.created_at).toLocaleString()}
                                                 {notification.is_read ? ' (Leída)' : ' (No Leída)'}
@@ -781,7 +822,7 @@ const AdminDashboard: React.FC = () => {
                                             {!notification.is_read && (
                                                 <button
                                                     onClick={() => handleMarkNotificationAsRead(notification.id)}
-                                                    className="button small-button primary-button mr-2"
+                                                    className="bg-blue-500 hover:bg-blue-600 text-white font-bold py-1 px-3 rounded-md text-sm mr-2 transition-colors duration-200"
                                                     title="Marcar como leída"
                                                 >
                                                     Marcar Leída
@@ -789,7 +830,7 @@ const AdminDashboard: React.FC = () => {
                                             )}
                                             <button
                                                 onClick={() => handleDeleteNotification(notification.id)}
-                                                className="ml-4 p-2 rounded-full text-red-500 hover:bg-red-100 dark:hover:bg-red-900 transition-colors duration-200"
+                                                className="p-2 rounded-full text-red-500 hover:bg-red-100 transition-colors duration-200"
                                                 title="Eliminar notificación"
                                             >
                                                 <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor" viewBox="0 0 16 16">
@@ -801,7 +842,7 @@ const AdminDashboard: React.FC = () => {
                                 ))}
                             </div>
                         ) : (
-                            <p className="info-text">No hay notificaciones disponibles.</p>
+                            <p className="text-gray-700 text-center">No hay notificaciones disponibles.</p>
                         )}
                     </div>
                 )}
@@ -809,322 +850,9 @@ const AdminDashboard: React.FC = () => {
                 {activeTab === 'bacarKeys' && (
                     <BacarKeys />
                 )}
-=======
-import React, { useState, useEffect } from 'react';
-import { useAuth } from '../context/AuthContext';
-import api from '../config/axiosConfig';
-import { isAxiosErrorTypeGuard } from '../utils/typeGuards';
-import '../index.css'; // Estilos globales
-import './AdminDashboard.css'; // Estilos específicos para el dashboard
-
-// Interfaces para los datos que vamos a mostrar
-interface Ticket {
-    id: number;
-    subject: string;
-    description: string;
-    status: 'open' | 'in-progress' | 'resolved' | 'closed';
-    priority: 'low' | 'medium' | 'high';
-    created_at: string;
-    updated_at: string;
-    user_username: string;
-    department_name: string;
-    agent_username: string | null;
-    user_id: number;
-    agent_id: number | null;
-    department_id: number;
-}
-
-interface User {
-    id: number;
-    username: string;
-    email: string;
-    role: 'admin' | 'agent' | 'user';
-    created_at: string;
-    updated_at: string;
-}
-
-interface Department {
-    id: number;
-    name: string;
-    description: string;
-}
-
-const AdminDashboard: React.FC = () => {
-    const { user, loading: authLoading } = useAuth();
-    const [activeTab, setActiveTab] = useState<'dashboard' | 'tickets' | 'users' | 'departments'>('dashboard');
-    const [dashboardData, setDashboardData] = useState<any>(null); // Datos para el dashboard principal
-    const [tickets, setTickets] = useState<Ticket[]>([]); // Lista de tickets
-    const [users, setUsers] = useState<User[]>([]); // Lista de usuarios
-    const [departments, setDepartments] = useState<Department[]>([]); // Lista de departamentos
-    const [dataLoading, setDataLoading] = useState(false);
-    const [error, setError] = useState<string | null>(null);
-
-    // Efecto para cargar los datos cuando cambia la pestaña activa
-    useEffect(() => {
-        const fetchData = async () => {
-            setDataLoading(true);
-            setError(null);
-            try {
-                if (activeTab === 'dashboard') {
-                    // Aquí podrías hacer una llamada a una nueva API para datos de dashboard
-                    // Por ahora, solo simular datos o usar datos existentes
-                    // Por ejemplo, podrías contar tickets por estado, usuarios por rol, etc.
-                    // Para empezar, solo cargaremos la lista de tickets para el dashboard
-                    const ticketsRes = await api.get('/api/tickets');
-                    setDashboardData({
-                        ticketsCount: ticketsRes.data.count,
-                        // Aquí se podrían añadir más estadísticas
-                    });
-                } else if (activeTab === 'tickets') {
-                    const res = await api.get('/api/tickets');
-                    setTickets(res.data.tickets);
-                } else if (activeTab === 'users') {
-                    const res = await api.get('/api/users'); // Asume que /api/users devuelve la lista
-                    setUsers(res.data.users);
-                } else if (activeTab === 'departments') {
-                    const res = await api.get('/api/departments');
-                    setDepartments(res.data.departments);
-                }
-            } catch (err: unknown) {
-                if (isAxiosErrorTypeGuard(err)) {
-                    setError(err.response?.data?.message || 'Error al cargar los datos.');
-                } else {
-                    setError('Ocurrió un error inesperado.');
-                }
-            } finally {
-                setDataLoading(false);
-            }
-        };
-
-        if (!authLoading && user && user.role === 'admin') {
-            fetchData();
-        }
-    }, [activeTab, authLoading, user]); // Dependencias: la pestaña activa, el estado de carga de auth y el usuario.
-
-    if (authLoading) {
-        return <div className="loading-message">Cargando autenticación...</div>;
-    }
-
-    if (!user || user.role !== 'admin') {
-        return <div className="error-message">Acceso denegado. No eres un administrador.</div>;
-    }
-
-    // Renderizar contenido de la pestaña activa
-    const renderTabContent = () => {
-        if (dataLoading) {
-            return <div className="loading-message">Cargando datos de {activeTab}...</div>;
-        }
-        if (error) {
-            return <div className="error-message">{error}</div>;
-        }
-
-        switch (activeTab) {
-            case 'dashboard':
-                return (
-                    <div className="dashboard-overview-grid">
-                        <h3>Dashboard Principal</h3>
-                        {/* 1C. Información gráfica (placeholders por ahora) */}
-                        <div className="dashboard-card">
-                            <h4>Tickets Totales</h4>
-                            <p className="big-number">{dashboardData?.ticketsCount || 0}</p>
-                            {/* Aquí iría un gráfico de barras o circular */}
-                            <div className="chart-placeholder">Gráfico de estados de tickets aquí</div>
-                        </div>
-                        <div className="dashboard-card">
-                            <h4>Tickets Abiertos</h4>
-                            <p className="big-number">?</p>
-                            <div className="chart-placeholder">Gráfico de prioridad aquí</div>
-                        </div>
-                        <div className="dashboard-card">
-                            <h4>Agentes Activos</h4>
-                            <p className="big-number">?</p>
-                            <div className="chart-placeholder">Gráfico de carga de agentes aquí</div>
-                        </div>
-                        <div className="dashboard-card">
-                            <h4>Departamentos</h4>
-                            <p className="big-number">{departments.length}</p> {/* Reutilizamos la info de departments */}
-                            <div className="chart-placeholder">Gráfico de tickets por departamento aquí</div>
-                        </div>
-                        <p className="info-text">Más estadísticas y gráficos se mostrarán aquí.</p>
-                    </div>
-                );
-            case 'tickets':
-                return (
-                    <div className="admin-tickets-section">
-                        <h3>Gestión de Tickets</h3>
-                        <p className="info-text">Aquí podrás ver y gestionar todos los tickets. (La misma información que antes)</p>
-                        {/* La tabla de tickets detallada iría aquí */}
-                        <table className="data-table">
-                            <thead>
-                                <tr>
-                                    <th>ID</th>
-                                    <th>Asunto</th>
-                                    <th>Descripción</th>
-                                    <th>Estado</th>
-                                    <th>Prioridad</th>
-                                    <th>Usuario</th>
-                                    <th>Departamento</th>
-                                    <th>Agente Asignado</th>
-                                    <th>Fecha Creación</th>
-                                    <th>Acciones</th> {/* Para asignar, cambiar estado, etc. */}
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {tickets.length > 0 ? (
-                                    tickets.map((ticket) => (
-                                        <tr key={ticket.id}>
-                                            <td>{ticket.id}</td>
-                                            <td>{ticket.subject}</td>
-                                            <td>{ticket.description.substring(0, 50)}...</td>
-                                            <td>{ticket.status}</td>
-                                            <td>{ticket.priority}</td>
-                                            <td>{ticket.user_username}</td>
-                                            <td>{ticket.department_name}</td>
-                                            <td>{ticket.agent_username || 'Sin Asignar'}</td>
-                                            <td>{new Date(ticket.created_at).toLocaleDateString()}</td>
-                                            <td>
-                                                {/* Botones de acción (ej. Asignar, Ver Detalle) */}
-                                                <button className="button primary-button small-button">Asignar</button>
-                                                <button className="button secondary-button small-button">Ver</button>
-                                            </td>
-                                        </tr>
-                                    ))
-                                ) : (
-                                    <tr>
-                                        <td colSpan={10}>No hay tickets para mostrar.</td>
-                                    </tr>
-                                )}
-                            </tbody>
-                        </table>
-                    </div>
-                );
-            case 'users':
-                return (
-                    <div className="admin-users-section">
-                        <h3>Gestión de Usuarios</h3>
-                        <p className="info-text">Aquí podrás ver y gestionar todos los usuarios del sistema.</p>
-                        {/* Tabla de usuarios */}
-                        <table className="data-table">
-                            <thead>
-                                <tr>
-                                    <th>ID</th>
-                                    <th>Nombre de Usuario</th>
-                                    <th>Email</th>
-                                    <th>Rol</th>
-                                    <th>Fecha Creación</th>
-                                    <th>Acciones</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {users.length > 0 ? (
-                                    users.map((userItem) => ( // Renombrado a userItem para evitar conflicto con 'user' del contexto
-                                        <tr key={userItem.id}>
-                                            <td>{userItem.id}</td>
-                                            <td>{userItem.username}</td>
-                                            <td>{userItem.email}</td>
-                                            <td>{userItem.role}</td>
-                                            <td>{new Date(userItem.created_at).toLocaleDateString()}</td>
-                                            <td>
-                                                <button className="button primary-button small-button">Editar</button>
-                                                <button className="button danger-button small-button">Eliminar</button>
-                                            </td>
-                                        </tr>
-                                    ))
-                                ) : (
-                                    <tr>
-                                        <td colSpan={6}>No hay usuarios para mostrar.</td>
-                                    </tr>
-                                )}
-                            </tbody>
-                        </table>
-                    </div>
-                );
-            case 'departments':
-                return (
-                    <div className="admin-departments-section">
-                        <h3>Gestión de Departamentos</h3>
-                        <p className="info-text">Aquí podrás ver y gestionar los departamentos de tickets.</p>
-                        {/* Tabla de departamentos */}
-                        <table className="data-table">
-                            <thead>
-                                <tr>
-                                    <th>ID</th>
-                                    <th>Nombre</th>
-                                    <th>Descripción</th>
-                                    <th>Acciones</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {departments.length > 0 ? (
-                                    departments.map((dept) => (
-                                        <tr key={dept.id}>
-                                            <td>{dept.id}</td>
-                                            <td>{dept.name}</td>
-                                            <td>{dept.description}</td>
-                                            <td>
-                                                <button className="button primary-button small-button">Editar</button>
-                                                <button className="button danger-button small-button">Eliminar</button>
-                                            </td>
-                                        </tr>
-                                    ))
-                                ) : (
-                                    <tr>
-                                        <td colSpan={4}>No hay departamentos para mostrar.</td>
-                                    </tr>
-                                )}
-                            </tbody>
-                        </table>
-                    </div>
-                );
-            default:
-                return null;
-        }
-    };
-
-    return (
-        <div className="admin-dashboard-container">
-            <h1 className="dashboard-title">Panel de Administrador</h1>
-            <p className="welcome-message">Bienvenido, {user?.username} ({user?.role})</p>
-
-            {/* Barra de Navegación de Pestañas */}
-            <div className="tab-navigation">
-                <button 
-                    className={`tab-button ${activeTab === 'dashboard' ? 'active' : ''}`}
-                    onClick={() => setActiveTab('dashboard')}
-                >
-                    Dashboard
-                </button>
-                <button 
-                    className={`tab-button ${activeTab === 'tickets' ? 'active' : ''}`}
-                    onClick={() => setActiveTab('tickets')}
-                >
-                    Gestión de Tickets
-                </button>
-                <button 
-                    className={`tab-button ${activeTab === 'users' ? 'active' : ''}`}
-                    onClick={() => setActiveTab('users')}
-                >
-                    Usuarios
-                </button>
-                <button 
-                    className={`tab-button ${activeTab === 'departments' ? 'active' : ''}`}
-                    onClick={() => setActiveTab('departments')}
-                >
-                    Departamentos
-                </button>
-            </div>
-
-            {/* Contenido de la Pestaña Activa */}
-            <div className="tab-content">
-                {renderTabContent()}
->>>>>>> 738f5bd513da1312d47de3d73a8767aec7efc67e
             </div>
         </div>
     );
 };
 
-<<<<<<< HEAD
 export default AdminDashboard;
-=======
-export default AdminDashboard;
->>>>>>> 738f5bd513da1312d47de3d73a8767aec7efc67e
