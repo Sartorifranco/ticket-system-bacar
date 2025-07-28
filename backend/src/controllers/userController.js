@@ -11,7 +11,7 @@ const getAllUsers = asyncHandler(async (req, res) => {
         const [users] = await pool.execute(
             `SELECT id, username, email, role, department_id, created_at, updated_at FROM users ORDER BY created_at DESC`
         );
-        res.status(200).json(users);
+        res.status(200).json({ users: users }); 
     } catch (error) {
         console.error('Error al obtener usuarios:', error.message, error.stack);
         res.status(500).json({ message: 'Error interno del servidor al obtener usuarios.' });

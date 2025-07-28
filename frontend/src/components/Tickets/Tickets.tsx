@@ -57,7 +57,7 @@ const Tickets: React.FC<TicketsProps> = () => {
             if (filterStatus !== 'all') queryParams.append('status', filterStatus);
             if (filterPriority !== 'all') queryParams.append('priority', filterPriority);
             if (filterDepartment !== 'all') queryParams.append('department_id', filterDepartment);
-            if (filterAgent !== 'all') queryParams.append('agent_id', filterAgent);
+            if (filterAgent !== 'all') queryParams.append('agent_id', filterAgent); // El backend espera agent_id en los filtros
             if (searchTerm) queryParams.append('search', searchTerm);
 
             const response = await api.get(`/api/tickets?${queryParams.toString()}`, {
@@ -74,11 +74,34 @@ const Tickets: React.FC<TicketsProps> = () => {
                 setError('Ocurrió un error inesperado al cargar los tickets.');
             }
             console.error('Error fetching tickets:', err);
-            setTickets([]); // Asegúrate de que tickets sea un array vacío en caso de error
+            setTickets([]); 
         } finally {
             setLoading(false);
         }
     }, [token, addNotification, signOut, filterStatus, filterPriority, filterDepartment, filterAgent, searchTerm]);
+
+    // Función para obtener un ticket específico por ID
+    const fetchTicketById = useCallback(async (ticketId: number) => {
+        try {
+            if (!token) {
+                addNotification('No autorizado. Token no disponible.', 'error');
+                return null;
+            }
+            const response = await api.get(`/api/tickets/${ticketId}`, {
+                headers: { Authorization: `Bearer ${token}` },
+            });
+            return response.data;
+        } catch (err: unknown) {
+            if (isAxiosErrorTypeGuard(err)) {
+                const apiError = err.response?.data as ApiResponseError;
+                addNotification(`Error al cargar detalle del ticket: ${apiError?.message || 'Error desconocido'}`, 'error');
+            } else {
+                addNotification('Ocurrió un error inesperado al cargar el detalle del ticket.', 'error');
+            }
+            console.error('Error fetching single ticket:', err);
+            return null;
+        }
+    }, [token, addNotification]);
 
     // Función para obtener usuarios y departamentos (para los filtros y modales)
     const fetchUsersAndDepartments = useCallback(async () => {
@@ -88,8 +111,10 @@ const Tickets: React.FC<TicketsProps> = () => {
                 api.get('/api/users', { headers: { Authorization: `Bearer ${token}` } }),
                 api.get('/api/departments', { headers: { Authorization: `Bearer ${token}` } }),
             ]);
-            setAllUsers(usersRes.data.users || []);
+            setAllUsers(usersRes.data.users || []); 
             setAllDepartments(departmentsRes.data.departments || []);
+            console.log('[DEBUG Tickets] Usuarios obtenidos para filtros/modales:', usersRes.data.users);
+            console.log('[DEBUG Tickets] Departamentos obtenidos para filtros/modales:', departmentsRes.data.departments);
         } catch (err: unknown) {
             console.error('Error fetching users or departments for filters/modals:', err);
             if (isAxiosErrorTypeGuard(err) && err.response?.status === 401) {
@@ -100,32 +125,40 @@ const Tickets: React.FC<TicketsProps> = () => {
 
     // Efecto para cargar tickets y datos de filtros al montar y cuando cambian los filtros
     useEffect(() => {
-        fetchUsersAndDepartments(); // Cargar usuarios y departamentos para los filtros
+        fetchUsersAndDepartments(); 
         fetchTickets();
     }, [fetchTickets, fetchUsersAndDepartments]);
 
     // Handlers para modales de ticket
-    const handleViewTicket = useCallback((ticket: TicketData) => {
-        setSelectedTicket(ticket);
-        setIsTicketDetailModalOpen(true);
-    }, []);
+    const handleViewTicket = useCallback(async (ticket: TicketData) => { 
+        const freshTicket = await fetchTicketById(ticket.id);
+        if (freshTicket) {
+            setSelectedTicket(freshTicket);
+            setIsTicketDetailModalOpen(true);
+        }
+    }, [fetchTicketById]);
 
     const handleCloseTicketDetailModal = useCallback(() => {
         setIsTicketDetailModalOpen(false);
         setSelectedTicket(null);
-        fetchTickets(); // Refrescar la lista de tickets después de cerrar el modal de detalle
+        fetchTickets(); 
     }, [fetchTickets]);
 
     const handleCreateTicket = useCallback(() => {
         setIsCreateTicketModalOpen(true);
     }, []);
 
-    const handleTicketCreatedOrUpdated = useCallback(() => {
+    const handleTicketCreatedOrUpdated = useCallback(async (updatedTicketId?: number) => { 
         setIsCreateTicketModalOpen(false);
-        // Si el modal de detalle también llama a esto, se cerrará y se refrescará
-        setIsTicketDetailModalOpen(false); // Asegurarse de cerrar el modal de detalle si estaba abierto
-        fetchTickets(); // Refrescar la lista de tickets
-    }, [fetchTickets]);
+        if (updatedTicketId && isTicketDetailModalOpen) {
+            const freshTicket = await fetchTicketById(updatedTicketId);
+            if (freshTicket) {
+                setSelectedTicket(freshTicket);
+            }
+        } else {
+            fetchTickets(); 
+        }
+    }, [fetchTickets, fetchTicketById, isTicketDetailModalOpen]); 
 
     const handleDeleteTicket = useCallback(async (ticketId: number) => {
         const confirmed = window.confirm('¿Estás seguro de que quieres eliminar este ticket?');
@@ -141,7 +174,7 @@ const Tickets: React.FC<TicketsProps> = () => {
                 headers: { Authorization: `Bearer ${token}` },
             });
             addNotification('Ticket eliminado exitosamente.', 'success');
-            fetchTickets(); // Refrescar la lista de tickets
+            fetchTickets(); 
         } catch (err: unknown) {
             if (isAxiosErrorTypeGuard(err)) {
                 const apiError = err.response?.data as ApiResponseError;
@@ -191,7 +224,7 @@ const Tickets: React.FC<TicketsProps> = () => {
                 >
                     <option value="all">Todos los estados</option>
                     {Object.entries(ticketStatusTranslations).map(([key, value]) => (
-                        <option key={key} value={key}>{value}</option>
+                        <option key={key} value={key}>{value}</option> 
                     ))}
                 </select>
                 <select
@@ -201,7 +234,7 @@ const Tickets: React.FC<TicketsProps> = () => {
                 >
                     <option value="all">Todas las prioridades</option>
                     {Object.entries(ticketPriorityTranslations).map(([key, value]) => (
-                        <option key={key} value={key}>{value}</option>
+                        <option key={key} value={key}>{value}</option> 
                     ))}
                 </select>
                 <select
@@ -311,8 +344,8 @@ const Tickets: React.FC<TicketsProps> = () => {
                 <TicketDetailModal
                     isOpen={isTicketDetailModalOpen}
                     onClose={handleCloseTicketDetailModal}
-                    ticket={selectedTicket}
-                    onTicketUpdated={handleTicketCreatedOrUpdated} // Se usa para refrescar la lista
+                    ticket={selectedTicket} 
+                    onTicketUpdated={() => handleTicketCreatedOrUpdated(selectedTicket.id)} 
                     token={token}
                     departments={allDepartments}
                     users={allUsers}
@@ -322,7 +355,7 @@ const Tickets: React.FC<TicketsProps> = () => {
                 <CreateTicketModal
                     isOpen={isCreateTicketModalOpen}
                     onClose={() => setIsCreateTicketModalOpen(false)}
-                    onTicketCreated={handleTicketCreatedOrUpdated} // Se usa para refrescar la lista
+                    onTicketCreated={handleTicketCreatedOrUpdated} 
                     token={token}
                     departments={allDepartments}
                     users={allUsers}

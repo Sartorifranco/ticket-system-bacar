@@ -100,7 +100,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             return;
         }
         try {
-            const response = await api.get<{ count: number }>('/api/notifications/unread/count', {
+            const response = await api.get<{ count: number }>('/api/notifications/unread-count', {
                 headers: { Authorization: `Bearer ${state.token}` },
             });
             setUnreadNotificationsCount(response.data.count);

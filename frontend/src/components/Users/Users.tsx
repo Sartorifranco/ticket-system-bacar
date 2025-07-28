@@ -1,26 +1,25 @@
 // frontend/src/components/Users/Users.tsx
 import React, { useState, useEffect, useCallback } from 'react';
 import api from '../../config/axiosConfig';
-import { useAuth } from '../../context/AuthContext'; 
-import { useNotification } from '../../context/NotificationContext'; // <-- AÑADIDO: Importar useNotification
-import { User, Department } from '../../types'; // Asegúrate de que User tenga department_id
+import { useAuth } from '../../context/AuthContext';
+import { useNotification } from '../../context/NotificationContext';
+import { User, Department } from '../../types';
 import { isAxiosErrorTypeGuard, ApiResponseError } from '../../utils/typeGuards';
-import UserEditModal from './UserEditModal'; 
-import { userRoleTranslations } from '../../utils/traslations'; 
+import UserEditModal from './UserEditModal'; // Asume que este modal existe
+import { userRoleTranslations } from '../../utils/traslations';
 
 interface UsersProps {
     onEditUser: (user: User | null) => void;
 }
 
-const Users: React.FC<UsersProps> = ({ onEditUser }) => { 
-    const { token, signOut } = useAuth(); // <-- MODIFICADO: Solo token y signOut de useAuth
-    const { addNotification } = useNotification(); // <-- AÑADIDO: addNotification de useNotification
+const Users: React.FC<UsersProps> = ({ onEditUser }) => {
+    const { token, signOut } = useAuth();
+    const { addNotification } = useNotification();
+
     const [users, setUsers] = useState<User[]>([]);
-    const [departments, setDepartments] = useState<Department[]>([]); 
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
-    const [isCreateUserModalOpen, setIsCreateUserModalOpen] = useState(false);
-    const [selectedUser, setSelectedUser] = useState<User | null>(null); 
+    const [departments, setDepartments] = useState<Department[]>([]); // Para mostrar nombres de departamento
 
     const fetchUsers = useCallback(async () => {
         setLoading(true);
@@ -29,90 +28,85 @@ const Users: React.FC<UsersProps> = ({ onEditUser }) => {
             if (!token) {
                 throw new Error('No autorizado. Token no disponible.');
             }
-            const [usersResponse, departmentsResponse] = await Promise.all([
-                api.get('/api/users', { headers: { Authorization: `Bearer ${token}` } }),
-                api.get('/api/departments', { headers: { Authorization: `Bearer ${token}` } }),
-            ]);
-            
-            // CORRECCIÓN CLAVE AQUÍ: Acceder directamente a response.data
-            setUsers(usersResponse.data || []); 
-            setDepartments(departmentsResponse.data.departments || []);
-            
-            // Opcional: Añadir un console.log para ver los datos recibidos en el frontend
-            console.log('[Users.tsx] Usuarios recibidos:', usersResponse.data);
-
+            const response = await api.get('/api/users', {
+                headers: { Authorization: `Bearer ${token}` },
+            });
+            console.log('[Users.tsx] Usuarios recibidos:', response.data);
+            // CORREGIDO: Asegurarse de que response.data.users sea un array y asignarlo al estado
+            setUsers(response.data.users || []); 
         } catch (err: unknown) {
             if (isAxiosErrorTypeGuard(err)) {
                 const apiError = err.response?.data as ApiResponseError;
-                setError(apiError?.message || 'Error al cargar usuarios o departamentos.');
-                addNotification(`Error al cargar datos: ${apiError?.message || 'Error desconocido'}`, 'error');
+                setError(apiError?.message || 'Error al cargar usuarios.');
+                addNotification(`Error al cargar usuarios: ${apiError?.message || 'Error desconocido'}`, 'error');
                 if (err.response?.status === 401) signOut();
             } else {
-                setError('Ocurrió un error inesperado al cargar los datos.');
+                setError('Ocurrió un error inesperado al cargar los usuarios.');
             }
-            console.error('Error fetching users or departments:', err);
+            console.error('Error fetching users:', err);
+            setUsers([]); // Asegura que el estado sea un array vacío en caso de error
         } finally {
             setLoading(false);
         }
     }, [token, addNotification, signOut]);
 
+    const fetchDepartments = useCallback(async () => {
+        try {
+            if (!token) return;
+            const response = await api.get('/api/departments', {
+                headers: { Authorization: `Bearer ${token}` },
+            });
+            setDepartments(response.data.departments || []);
+        } catch (err: unknown) {
+            console.error('Error fetching departments for user list:', err);
+            if (isAxiosErrorTypeGuard(err) && err.response?.status === 401) {
+                signOut();
+            }
+        }
+    }, [token, signOut]);
+
     useEffect(() => {
         fetchUsers();
-    }, [fetchUsers]);
+        fetchDepartments();
+    }, [fetchUsers, fetchDepartments]);
 
-    const handleCreateUser = () => {
-        setSelectedUser(null); 
-        setIsCreateUserModalOpen(true);
-    };
-
-    const handleEditUserClick = (user: User) => {
-        onEditUser(user); 
-    };
-
-    const handleUserUpdatedOrCreated = () => {
-        setIsCreateUserModalOpen(false); 
-        fetchUsers(); 
-    };
-
-    const handleDeleteUser = async (userId: number) => {
-        const confirmed = window.confirm('¿Estás seguro de que quieres eliminar este usuario?');
+    const handleDeleteUser = useCallback(async (userId: number) => {
+        const confirmed = window.confirm('¿Estás seguro de que quieres eliminar este usuario? Esta acción es irreversible.');
         if (!confirmed) return;
 
         setLoading(true);
-        setError(null);
         try {
             if (!token) {
-                throw new Error('No autorizado. Token no disponible.');
+                addNotification('No autorizado para eliminar usuarios.', 'error');
+                return;
             }
             await api.delete(`/api/users/${userId}`, {
                 headers: { Authorization: `Bearer ${token}` },
             });
             addNotification('Usuario eliminado exitosamente.', 'success');
-            fetchUsers(); 
+            fetchUsers(); // Refrescar la lista de usuarios
         } catch (err: unknown) {
             if (isAxiosErrorTypeGuard(err)) {
                 const apiError = err.response?.data as ApiResponseError;
-                setError(apiError?.message || 'Error al eliminar usuario.');
                 addNotification(`Error al eliminar usuario: ${apiError?.message || 'Error desconocido'}`, 'error');
-                if (err.response?.status === 401) signOut();
             } else {
-                setError('Ocurrió un error inesperado al eliminar el usuario.');
+                addNotification('Ocurrió un error inesperado al eliminar el usuario.', 'error');
             }
             console.error('Error deleting user:', err);
         } finally {
             setLoading(false);
         }
-    };
+    }, [token, addNotification, fetchUsers]);
 
     const getDepartmentName = (departmentId: number | null) => {
         if (!departmentId) return 'N/A';
-        const department = departments.find(dep => dep.id === departmentId);
-        return department ? department.name : 'Desconocido';
+        const dept = departments.find(d => d.id === departmentId);
+        return dept ? dept.name : 'Desconocido';
     };
 
     if (loading) {
         return (
-            <div className="loading-message">🔄 Cargando usuarios...</div>
+            <div className="loading-message text-center py-4">🔄 Cargando usuarios...</div>
         );
     }
 
@@ -126,48 +120,55 @@ const Users: React.FC<UsersProps> = ({ onEditUser }) => {
     }
 
     return (
-        <div className="users-management">
-            <h2 className="text-2xl font-bold text-primary-color mb-4 text-center">Gestión de Usuarios</h2>
-            <p className="info-text text-center mb-6">Administra los usuarios del sistema, sus roles y departamentos.</p>
+        <div className="users-management p-4">
+            <h2 className="text-2xl font-bold text-gray-800 mb-4 text-center">Gestión de Usuarios</h2>
+            <p className="text-gray-700 mb-6 text-center">Administra los usuarios del sistema, sus roles y departamentos.</p>
 
             <div className="flex justify-end mb-4">
-                <button onClick={handleCreateUser} className="button primary-button">
+                <button onClick={() => onEditUser(null)} className="button primary-button">
                     Crear Nuevo Usuario
                 </button>
             </div>
 
             {users.length > 0 ? (
-                <div className="table-responsive">
-                    <table className="data-table">
-                        <thead>
+                <div className="overflow-x-auto bg-white rounded-lg shadow-md">
+                    <table className="min-w-full divide-y divide-gray-200">
+                        <thead className="bg-gray-100">
                             <tr>
-                                <th>ID</th>
-                                <th>Nombre de Usuario</th>
-                                <th>Email</th>
-                                <th>Rol</th>
-                                <th>Departamento</th>
-                                <th>Acciones</th>
+                                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">ID</th>
+                                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Usuario</th>
+                                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Email</th>
+                                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Rol</th>
+                                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Departamento</th>
+                                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Acciones</th>
                             </tr>
                         </thead>
-                        <tbody>
+                        <tbody className="bg-white divide-y divide-gray-200">
                             {users.map((user) => (
-                                <tr key={user.id}>
-                                    <td>{user.id}</td>
-                                    <td>{user.username}</td>
-                                    <td>{user.email}</td>
-                                    <td><span className={`status-badge status-${user.role}`}>{userRoleTranslations[user.role]}</span></td>
-                                    {/* CORREGIDO: Acceso a department_id después de la actualización de types.ts */}
-                                    <td>{getDepartmentName(user.department_id || null)}</td>
-                                    <td>
+                                <tr key={user.id}> {/* Usar user.id como key */}
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{user.id}</td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{user.username}</td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{user.email}</td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm">
+                                        <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full 
+                                            ${user.role === 'admin' ? 'bg-red-100 text-red-800' : ''}
+                                            ${user.role === 'agent' ? 'bg-blue-100 text-blue-800' : ''}
+                                            ${user.role === 'client' ? 'bg-green-100 text-green-800' : ''}
+                                        `}>
+                                            {userRoleTranslations[user.role] || user.role}
+                                        </span>
+                                    </td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{getDepartmentName(user.department_id)}</td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                                         <button
-                                            onClick={() => handleEditUserClick(user)}
-                                            className="button small-button secondary-button mr-2"
+                                            onClick={() => onEditUser(user)}
+                                            className="text-indigo-600 hover:text-indigo-900 mr-3"
                                         >
                                             Editar
                                         </button>
                                         <button
                                             onClick={() => handleDeleteUser(user.id)}
-                                            className="button small-button delete-button"
+                                            className="text-red-600 hover:text-red-900"
                                         >
                                             Eliminar
                                         </button>
@@ -178,19 +179,7 @@ const Users: React.FC<UsersProps> = ({ onEditUser }) => {
                     </table>
                 </div>
             ) : (
-                <p className="info-text">No hay usuarios registrados.</p>
-            )}
-
-            {/* Modal de Creación/Edición de Usuario (si lo manejas aquí) */}
-            {isCreateUserModalOpen && (
-                <UserEditModal
-                    isOpen={isCreateUserModalOpen}
-                    onClose={() => setIsCreateUserModalOpen(false)}
-                    user={null} 
-                    onUserUpdated={handleUserUpdatedOrCreated}
-                    token={token} 
-                    departments={departments} 
-                />
+                <p className="info-text text-center">No hay usuarios registrados.</p>
             )}
         </div>
     );

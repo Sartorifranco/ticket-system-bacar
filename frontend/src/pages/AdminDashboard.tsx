@@ -94,7 +94,6 @@ const AdminDashboard: React.FC = () => {
                 const apiError = err.response?.data as ApiResponseError;
                 setError(apiError?.message || 'Error al cargar métricas del dashboard.');
                 addNotification(`Error al cargar métricas: ${apiError?.message || 'Error desconocido'}`, 'error');
-                // Corrección: Usar apiError.status en lugar de err.response?.status
                 if (err.response?.status === 401) signOut(); 
             } else {
                 setError('Ocurrió un error inesperado al cargar las métricas.');
@@ -121,7 +120,6 @@ const AdminDashboard: React.FC = () => {
                 const apiError = err.response?.data as ApiResponseError;
                 setError(apiError?.message || 'Error al cargar actividades recientes.');
                 addNotification(`Error al cargar actividades: ${apiError?.message || 'Error desconocido'}`, 'error');
-                // Corrección: Usar apiError.status en lugar de err.response?.status
                 if (err.response?.status === 401) signOut();
             } else {
                 setError('Ocurrió un error inesperado al cargar las actividades.');
@@ -151,7 +149,6 @@ const AdminDashboard: React.FC = () => {
                 const apiError = err.response?.data as ApiResponseError;
                 setError(apiError?.message || 'Error al cargar tickets recientes.');
                 addNotification(`Error al cargar tickets: ${apiError?.message || 'Error desconocido'}`, 'error');
-                // Corrección: Usar apiError.status en lugar de err.response?.status
                 if (err.response?.status === 401) signOut();
             } else {
                 setError('Ocurrió un error inesperado al cargar los tickets.');
@@ -179,7 +176,6 @@ const AdminDashboard: React.FC = () => {
                 const apiError = err.response?.data as ApiResponseError;
                 setError(apiError?.message || 'Error al cargar notificaciones.');
                 addNotification(`Error al cargar notificaciones: ${apiError?.message || 'Error desconocido'}`, 'error');
-                // Corrección: Usar apiError.status en lugar de err.response?.status
                 if (err.response?.status === 401) signOut();
             } else {
                 setError('Ocurrió un error inesperado al cargar las notificaciones.');
@@ -350,7 +346,7 @@ const AdminDashboard: React.FC = () => {
     const handleCloseDepartmentEditModal = useCallback(() => {
         setIsDepartmentEditModalOpen(false);
         setSelectedDepartment(null);
-    }, []);
+    }, []); 
 
     const handleDepartmentUpdated = useCallback(() => {
         handleCloseDepartmentEditModal();
@@ -528,8 +524,8 @@ const AdminDashboard: React.FC = () => {
                             {recentActivities.length > 0 ? (
                                 <ul className="space-y-2">
                                     {recentActivities.map(activity => (
-                                        <li key={activity.id} className="border-b border-gray-200 pb-2 last:border-b-0">
-                                            <p className="text-gray-700">
+                                        <li key={activity.id} className="border-b border-gray-200 pb-2 last:border-b-0"> {/* Usar activity.id como key */}
+                                            <p className="text-sm text-gray-800">
                                                 <span className="font-medium">{activity.user_username || 'Sistema'}</span>{' '}
                                                 {activity.description}
                                                 <span className="text-sm text-gray-500 ml-2">
@@ -569,13 +565,14 @@ const AdminDashboard: React.FC = () => {
                                                         <button onClick={() => handleViewTicket(ticket)} className="text-indigo-600 hover:text-indigo-900">
                                                             {ticket.title}
                                                         </button>
-                                                    </td> 
+                                                    </td>
                                                     <td className="px-6 py-4 whitespace-nowrap text-sm">
                                                         <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full 
                                                             ${ticket.status === 'open' ? 'bg-blue-100 text-blue-800' : ''}
                                                             ${ticket.status === 'in-progress' ? 'bg-yellow-100 text-yellow-800' : ''}
                                                             ${ticket.status === 'resolved' ? 'bg-green-100 text-green-800' : ''}
                                                             ${ticket.status === 'closed' ? 'bg-gray-100 text-gray-800' : ''}
+                                                            ${ticket.status === 'reopened' ? 'bg-purple-100 text-purple-800' : ''}
                                                         `}>
                                                             {ticketStatusTranslations[ticket.status] || ticket.status}
                                                         </span>
@@ -585,6 +582,7 @@ const AdminDashboard: React.FC = () => {
                                                             ${ticket.priority === 'low' ? 'bg-green-100 text-green-800' : ''}
                                                             ${ticket.priority === 'medium' ? 'bg-yellow-100 text-yellow-800' : ''}
                                                             ${ticket.priority === 'high' ? 'bg-red-100 text-red-800' : ''}
+                                                            ${ticket.priority === 'urgent' ? 'bg-purple-100 text-purple-800' : ''}
                                                         `}>
                                                             {ticketPriorityTranslations[ticket.priority] || ticket.priority}
                                                         </span>
@@ -620,7 +618,7 @@ const AdminDashboard: React.FC = () => {
                                             label={({ name, percent }) => `${name} (${((percent || 0) * 100).toFixed(0)}%)`}
                                         >
                                             {ticketsByStatusData.map((entry, index) => (
-                                                <Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />
+                                                <Cell key={`status-cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} /> /* Unique key */
                                             ))}
                                         </Pie>
                                         <Tooltip formatter={(value: number, name: string) => [`${value} tickets`, name]} />
@@ -646,7 +644,7 @@ const AdminDashboard: React.FC = () => {
                                             label={({ name, percent }) => `${name} (${((percent || 0) * 100).toFixed(0)}%)`}
                                         >
                                             {ticketsByPriorityData.map((entry, index) => (
-                                                <Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />
+                                                <Cell key={`priority-cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} /> /* Unique key */
                                             ))}
                                         </Pie>
                                         <Tooltip formatter={(value: number, name: string) => [`${value} tickets`, name]} />
@@ -667,8 +665,8 @@ const AdminDashboard: React.FC = () => {
                                         <Legend />
                                         <Line type="monotone" dataKey="open" stroke="#8884d8" name="Abiertos" />
                                         <Line type="monotone" dataKey="inProgress" stroke="#82ca9d" name="En Progreso" />
-                                        <Line type="monotone" dataKey="closed" stroke="#ffc658" name="Cerrados" /> 
-                                        <Line type="monotone" dataKey="reopened" stroke="#ff7300" name="Reabiertos" /> 
+                                        <Line type="monotone" dataKey="closed" stroke="#ffc658" name="Cerrados" />
+                                        <Line type="monotone" dataKey="reopened" stroke="#ff7300" name="Reabiertos" />
                                     </LineChart>
                                 </ResponsiveContainer>
                             </div>
@@ -686,7 +684,7 @@ const AdminDashboard: React.FC = () => {
                                         <Line type="monotone" dataKey="low" stroke="#4CAF50" name="Baja" />
                                         <Line type="monotone" dataKey="medium" stroke="#FFC107" name="Media" />
                                         <Line type="monotone" dataKey="high" stroke="#F44336" name="Alta" />
-                                        <Line type="monotone" dataKey="urgent" stroke="#9C27B0" name="Urgente" /> 
+                                        <Line type="monotone" dataKey="urgent" stroke="#9C27B0" name="Urgente" />
                                     </LineChart>
                                 </ResponsiveContainer>
                             </div>

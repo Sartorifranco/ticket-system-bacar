@@ -39,18 +39,17 @@ export interface Comment {
     created_at: string;
 }
 
-// Interfaz para los logs de actividad
+// Interfaz para los logs de actividad (AJUSTADO: usa 'action_type' y 'target_type/target_id' no opcionales)
 export interface ActivityLog {
     id: number;
     user_id: number;
     user_username: string;
     user_role: UserRole;
-    ticket_id: number | null; 
-    activity_type: string; 
+    action_type: string; // Cambiado de 'activity_type' a 'action_type' para coincidir con el backend
     description: string;
     created_at: string;
-    target_type?: string; 
-    target_id?: number; 
+    target_type: string; // No opcional, ya que el backend lo usa
+    target_id: number; // No opcional, ya que el backend lo usa
     old_value?: any; 
     new_value?: any; 
 }
@@ -67,12 +66,12 @@ export interface TicketData {
     user_username: string;
     user_email: string;
     // CORREGIDO: Ahora puede ser 'number | null'
-    assigned_to_user_id: number | null; 
+    assigned_to_user_id: number | null; // Usar assigned_to_user_id
     agent_username: string | null;
     agent_email: string | null;
     // CORREGIDO: Ahora puede ser 'number | null'
     department_id: number | null; 
-    department_name: string; // department_name puede ser string o null si department_id es null
+    department_name: string | null; // department_name puede ser string o null si department_id es null
     created_at: string;
     updated_at: string;
     // Usar 'closed_at' para que coincida con TicketDetail.tsx y TicketDetailModal.tsx
@@ -93,7 +92,7 @@ export interface Notification {
     created_at: string;
 }
 
-// Interfaz para las métricas del dashboard
+// Interfaz para las métricas del dashboard (basado en tu definición)
 export interface ReportMetrics {
     totalTickets: number;
     openTickets: number;
@@ -111,7 +110,7 @@ export interface ReportMetrics {
     departmentPerformance: { departmentName: string; totalTickets: number; avgResolutionTimeHours: number | null }[];
 }
 
-// Interfaz para BacarKey
+// Interfaz para BacarKey (basado en tu definición)
 export interface BacarKey {
     id: number;
     key_value: string; 

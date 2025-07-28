@@ -2,24 +2,24 @@
 // Este componente es un modal para ver y editar los detalles de un ticket.
 // Recibe los datos del ticket y otras dependencias como props.
 
-import React, { useState, useEffect, useCallback } from 'react';
-import Modal from '../Common/Modal'; // Asegúrate de que la ruta sea correcta para tu componente Modal
+import React, { useState, useEffect, useCallback, useRef } from 'react'; 
+import Modal from '../Common/Modal'; 
 import api from '../../config/axiosConfig';
 import { TicketData, User, Department, TicketStatus, TicketPriority, Comment } from '../../types';
 import { isAxiosErrorTypeGuard, ApiResponseError } from '../../utils/typeGuards';
 import { useAuth } from '../../context/AuthContext';
 import { useNotification } from '../../context/NotificationContext'; 
 import { ticketStatusTranslations, ticketPriorityTranslations } from '../../utils/traslations';
-import { format } from 'date-fns'; // Importar format de date-fns
+import { format } from 'date-fns'; 
 
 interface TicketDetailModalProps {
     isOpen: boolean;
     onClose: () => void;
     ticket: TicketData;
-    onTicketUpdated: () => void; // Callback para cuando el ticket se actualiza
+    onTicketUpdated: () => void; 
     token: string | null;
     departments: Department[];
-    users: User[];
+    users: User[]; 
 }
 
 const TicketDetailModal: React.FC<TicketDetailModalProps> = ({ 
@@ -43,10 +43,12 @@ const TicketDetailModal: React.FC<TicketDetailModalProps> = ({
     const [status, setStatus] = useState<TicketStatus>(ticket.status);
     const [priority, setPriority] = useState<TicketPriority>(ticket.priority);
     const [departmentId, setDepartmentId] = useState<number | null>(ticket.department_id);
-    const [agentId, setAgentId] = useState<number | null>(ticket.assigned_to_user_id || null); 
+    const [agentId, setAgentId] = useState<number | null>(ticket.assigned_to_user_id || null); // Usar assigned_to_user_id
 
     const [commentText, setCommentText] = useState('');
     const [isEditing, setIsEditing] = useState(false);
+
+    const commentsEndRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
         if (isOpen) { 
@@ -56,12 +58,19 @@ const TicketDetailModal: React.FC<TicketDetailModalProps> = ({
             setStatus(ticket.status);
             setPriority(ticket.priority);
             setDepartmentId(ticket.department_id);
-            setAgentId(ticket.assigned_to_user_id || null); 
+            setAgentId(ticket.assigned_to_user_id || null); // Usar assigned_to_user_id
             setError(null);
             setIsEditing(false);
             setCommentText('');
         }
     }, [isOpen, ticket]); 
+
+    useEffect(() => {
+        if (commentsEndRef.current) {
+            console.log('[DEBUG TicketDetailModal] Realizando scroll a comentarios.'); 
+            commentsEndRef.current.scrollIntoView({ behavior: 'smooth' });
+        }
+    }, [currentTicket.comments?.length]); 
 
     const handleSaveEdits = useCallback(async () => {
         setLoading(true);
@@ -78,8 +87,12 @@ const TicketDetailModal: React.FC<TicketDetailModalProps> = ({
             if (status !== currentTicket.status) updatedFields.status = status;
             if (priority !== currentTicket.priority) updatedFields.priority = priority;
             
-            if (departmentId !== currentTicket.department_id) updatedFields.department_id = departmentId;
-            if (agentId !== currentTicket.assigned_to_user_id) updatedFields.assigned_to_user_id = agentId; 
+            const departmentIdToSend = departmentId === null || isNaN(departmentId) ? null : departmentId;
+            const agentIdToSend = agentId === null || isNaN(agentId) ? null : agentId;
+
+            if (departmentIdToSend !== currentTicket.department_id) updatedFields.department_id = departmentIdToSend;
+            // Usar assigned_to_user_id para el campo que se envía al backend
+            if (agentIdToSend !== currentTicket.assigned_to_user_id) updatedFields.assigned_to_user_id = agentIdToSend; 
 
             if (Object.keys(updatedFields).length === 0) {
                 addNotification('No se detectaron cambios para guardar.', 'info');
@@ -87,10 +100,16 @@ const TicketDetailModal: React.FC<TicketDetailModalProps> = ({
                 return;
             }
 
+            console.log('[DEBUG TicketDetailModal] Enviando actualización de ticket con campos:', updatedFields); 
+
             const response = await api.put(`/api/tickets/${currentTicket.id}`, updatedFields, {
                 headers: { Authorization: `Bearer ${token}` },
             });
+            
+            console.log('[DEBUG TicketDetailModal] Respuesta de la API al actualizar ticket:', response.data); 
             setCurrentTicket(response.data); 
+            console.log('[DEBUG TicketDetailModal] currentTicket después de actualizar estado (assigned_to_user_id):', response.data.assigned_to_user_id, 'agent_username:', response.data.agent_username); 
+
             addNotification('Ticket actualizado exitosamente.', 'success');
             onTicketUpdated(); 
             setIsEditing(false);
@@ -99,6 +118,7 @@ const TicketDetailModal: React.FC<TicketDetailModalProps> = ({
                 const apiError = err.response?.data as ApiResponseError;
                 setError(apiError?.message || 'Error al actualizar el ticket.');
                 addNotification(`Error al actualizar ticket: ${apiError?.message || 'Error desconocido'}`, 'error');
+                console.error('[DEBUG TicketDetailModal] Error de Axios al actualizar ticket:', apiError); 
             } else {
                 setError('Ocurrió un error inesperado al actualizar el ticket.');
                 addNotification('Ocurrió un error inesperado al actualizar el ticket.', 'error');
@@ -124,28 +144,30 @@ const TicketDetailModal: React.FC<TicketDetailModalProps> = ({
                 return;
             }
 
-            // --- INICIO DE DEBUGGING ---
-            console.log('[DEBUG TicketDetailModal] Valor de commentText antes de enviar:', commentText);
-            // --- FIN DE DEBUGGING ---
-
-            const response = await api.post(`/api/tickets/${currentTicket.id}/comments`, { message_text: commentText }, {
+            await api.post(`/api/tickets/${currentTicket.id}/comments`, { message_text: commentText }, {
                 headers: { Authorization: `Bearer ${token}` },
             });
             
             const updatedTicketResponse = await api.get(`/api/tickets/${currentTicket.id}`, {
                 headers: { Authorization: `Bearer ${token}` },
             });
-            setCurrentTicket(updatedTicketResponse.data);
+            
+            setCurrentTicket(prevTicket => ({
+                ...updatedTicketResponse.data,
+                comments: [...(updatedTicketResponse.data.comments || [])] 
+            }));
+            
+            console.log('[DEBUG TicketDetailModal] currentTicket después de añadir comentario y refrescar:', updatedTicketResponse.data);
+            console.log('[DEBUG TicketDetailModal] Comentarios en el estado actualizado:', updatedTicketResponse.data.comments);
+            
             setCommentText('');
             addNotification('Comentario añadido exitosamente.', 'success');
             onTicketUpdated(); 
         } catch (err: unknown) {
-            // --- INICIO DE DEBUGGING ---
             console.error('[DEBUG TicketDetailModal] Error completo al añadir comentario:', err);
             if (isAxiosErrorTypeGuard(err)) {
                 console.error('[DEBUG TicketDetailModal] Datos de respuesta de error de Axios:', err.response?.data);
             }
-            // --- FIN DE DEBUGGING ---
 
             if (isAxiosErrorTypeGuard(err)) {
                 const apiError = err.response?.data as ApiResponseError;
@@ -159,7 +181,7 @@ const TicketDetailModal: React.FC<TicketDetailModalProps> = ({
         } finally {
             setLoading(false);
         }
-    }, [commentText, currentTicket, token, addNotification, onTicketUpdated]);
+    }, [commentText, currentTicket, token, addNotification, onTicketUpdated]); 
 
     const handleCancelEdit = useCallback(() => {
         setTitle(ticket.title); 
@@ -167,7 +189,7 @@ const TicketDetailModal: React.FC<TicketDetailModalProps> = ({
         setStatus(ticket.status);
         setPriority(ticket.priority);
         setDepartmentId(ticket.department_id);
-        setAgentId(ticket.assigned_to_user_id || null); 
+        setAgentId(ticket.assigned_to_user_id || null); // Usar assigned_to_user_id
         setIsEditing(false);
         setError(null);
     }, [ticket]);
@@ -191,7 +213,15 @@ const TicketDetailModal: React.FC<TicketDetailModalProps> = ({
 
     const isAgentOrAdmin = currentUser?.role === 'admin' || currentUser?.role === 'agent';
     const canEdit = isAgentOrAdmin || (currentUser?.id === currentTicket.user_id && (currentTicket.status === 'open' || currentTicket.status === 'in-progress' || currentTicket.status === 'reopened'));
-    const canAssign = currentUser?.role === 'admin' || (currentUser?.role === 'agent' && (currentTicket.assigned_to_user_id === currentUser.id || currentTicket.assigned_to_user_id === null));
+    const canAssign = currentUser?.role === 'admin' || (currentUser?.role === 'agent' && (currentTicket.assigned_to_user_id === currentUser.id || currentTicket.assigned_to_user_id === null)); // Usar currentTicket.assigned_to_user_id
+
+    console.log('[DEBUG TicketDetailModal] Prop `users` recibida:', users);
+    const availableAgents = users.filter(u => u.role === 'agent');
+    console.log('[DEBUG TicketDetailModal] Agentes disponibles (filtrados):', availableAgents);
+    console.log('[DEBUG TicketDetailModal] Valor actual de agentId (estado):', agentId);
+    console.log('[DEBUG TicketDetailModal] currentTicket.assigned_to_user_id:', currentTicket.assigned_to_user_id); // Usar currentTicket.assigned_to_user_id
+    console.log('[DEBUG TicketDetailModal] currentTicket.agent_username:', currentTicket.agent_username);
+
 
     if (!isOpen) return null;
 
@@ -223,7 +253,7 @@ const TicketDetailModal: React.FC<TicketDetailModalProps> = ({
                                 className="form-select"
                             >
                                 {Object.entries(ticketStatusTranslations).map(([key, value]) => (
-                                    <option key={key} value={key}>{value}</option>
+                                    <option key={key} value={key}>{value}</option> 
                                 ))}
                             </select>
                         ) : (
@@ -241,7 +271,7 @@ const TicketDetailModal: React.FC<TicketDetailModalProps> = ({
                                 className="form-select"
                             >
                                 {Object.entries(ticketPriorityTranslations).map(([key, value]) => (
-                                    <option key={key} value={key}>{value}</option>
+                                    <option key={key} value={key}>{value}</option> 
                                 ))}
                             </select>
                         ) : (
@@ -280,7 +310,7 @@ const TicketDetailModal: React.FC<TicketDetailModalProps> = ({
                                 className="form-select"
                             >
                                 <option value="">Sin asignar</option>
-                                {users.filter(u => u.role === 'agent').map(agent => (
+                                {availableAgents.map(agent => ( 
                                     <option key={agent.id} value={agent.id}>{agent.username}</option>
                                 ))}
                             </select>
@@ -320,20 +350,24 @@ const TicketDetailModal: React.FC<TicketDetailModalProps> = ({
 
                 <h3 className="text-xl font-bold text-gray-800 mb-4 border-t pt-4">Comentarios</h3>
                 <div className="max-h-60 overflow-y-auto border border-gray-200 rounded-md p-3 mb-4 bg-gray-50">
-                    {currentTicket.comments && currentTicket.comments.length > 0 ? (
-                        currentTicket.comments.map((comment: Comment) => (
-                            <div key={comment.id} className="bg-white p-3 rounded-lg shadow-sm mb-3 last:mb-0">
-                                <p className="text-gray-700">
-                                    <span className="font-semibold">{comment.user_username}:</span> {comment.message} 
-                                </p>
-                                <p className="text-sm text-gray-500 text-right">
-                                    {formatTimestamp(comment.created_at)}
-                                </p>
-                            </div>
-                        ))
-                    ) : (
-                        <p className="text-gray-600">No hay comentarios para este ticket.</p>
-                    )}
+                    <> 
+                        {console.log('[DEBUG Render - Comentarios] currentTicket.comments:', currentTicket.comments)}
+                        {Array.isArray(currentTicket.comments) && currentTicket.comments.length > 0 ? (
+                            currentTicket.comments.map((comment: Comment) => (
+                                <div key={comment.id} className="bg-white p-3 rounded-lg shadow-sm mb-3 last:mb-0">
+                                    <p className="text-gray-700">
+                                        <span className="font-semibold">{comment.user_username}:</span> {comment.message} 
+                                    </p>
+                                    <p className="text-sm text-gray-500 text-right">
+                                        {formatTimestamp(comment.created_at)}
+                                    </p>
+                                </div>
+                            ))
+                        ) : (
+                            <p className="text-gray-600">No hay comentarios para este ticket.</p>
+                        )}
+                        <div ref={commentsEndRef} />
+                    </>
                 </div>
 
                 <form onSubmit={handleAddComment} className="flex flex-col gap-3">

@@ -1,201 +1,170 @@
 // backend/src/controllers/dashboardController.js
 const asyncHandler = require('express-async-handler');
-const pool = require('../config/db'); // Importa el pool de conexión a la base de datos
+const pool = require('../config/db');
 
 // @desc    Obtener métricas del dashboard
 // @route   GET /api/dashboard/metrics
-// @access  Private (Admin only)
+// @access  Private/Admin
 const getDashboardMetrics = asyncHandler(async (req, res) => {
-    // req.user viene del middleware 'protect'
-    if (!req.user || req.user.role !== 'admin') {
-        res.status(403);
-        throw new Error('No autorizado para acceder a las métricas del dashboard');
-    }
-
     try {
-        console.log('[DEBUG DashboardController] Obteniendo métricas del dashboard...');
-
-        // Total Tickets
+        // 1. Total Tickets
         const [totalTicketsResult] = await pool.execute('SELECT COUNT(*) AS count FROM tickets');
         const totalTickets = totalTicketsResult[0].count;
-        console.log('[DEBUG DashboardController] Total Tickets:', totalTickets);
 
-        // Tickets por estado
-        const [ticketsByStatusResult] = await pool.execute(
-            `SELECT status, COUNT(*) AS count
-             FROM tickets
-             GROUP BY status`
-        );
-        const ticketsByStatus = ticketsByStatusResult.map(row => ({
-            name: row.status,
-            value: row.count
-        }));
-        console.log('[DEBUG DashboardController] Tickets por estado (RAW):', ticketsByStatusResult);
-        console.log('[DEBUG DashboardController] Tickets por estado (Formateado):', ticketsByStatus);
-
-
-        // Tickets Abiertos
-        const [openTicketsResult] = await pool.execute(
-            `SELECT COUNT(*) AS count FROM tickets WHERE status = 'open'`
-        );
+        // 2. Tickets Abiertos
+        const [openTicketsResult] = await pool.execute("SELECT COUNT(*) AS count FROM tickets WHERE status = 'open'");
         const openTickets = openTicketsResult[0].count;
-        console.log('[DEBUG DashboardController] Tickets Abiertos:', openTickets);
 
-        // Tickets en progreso
-        const [inProgressTicketsResult] = await pool.execute(
-            `SELECT COUNT(*) AS count FROM tickets WHERE status = 'in-progress'`
-        );
+        // 3. Tickets En Progreso
+        const [inProgressTicketsResult] = await pool.execute("SELECT COUNT(*) AS count FROM tickets WHERE status = 'in-progress'");
         const inProgressTickets = inProgressTicketsResult[0].count;
-        console.log('[DEBUG DashboardController] Tickets en Progreso:', inProgressTickets);
 
-        // Tickets resueltos
-        const [resolvedTicketsResult] = await pool.execute(
-            `SELECT COUNT(*) AS count FROM tickets WHERE status = 'resolved'`
-        );
-        const resolvedTickets = resolvedTicketsResult[0].count;
-        console.log('[DEBUG DashboardController] Tickets Resueltos:', resolvedTickets);
+        // 4. Tickets Cerrados
+        const [closedTicketsResult] = await pool.execute("SELECT COUNT(*) AS count FROM tickets WHERE status = 'closed' OR status = 'resolved'");
+        const closedTickets = closedTicketsResult[0].count;
 
-        // Tickets por prioridad
-        const [ticketsByPriorityResult] = await pool.execute(
-            `SELECT priority, COUNT(*) AS count
-             FROM tickets
-             GROUP BY priority`
-        );
-        const ticketsByPriority = ticketsByPriorityResult.map(row => ({
-            name: row.priority,
-            value: row.count
-        }));
-        console.log('[DEBUG DashboardController] Tickets por Prioridad:', ticketsByPriority);
+        // 5. Tickets Reabiertos (si tu sistema los maneja explícitamente)
+        const [reopenedTicketsResult] = await pool.execute("SELECT COUNT(*) AS count FROM tickets WHERE status = 'reopened'");
+        const reopenedTickets = reopenedTicketsResult[0].count;
 
-        // Tickets por agente (incluyendo 'unassigned')
-        const [ticketsByAgentResult] = await pool.execute(
-            `SELECT COALESCE(u.username, 'unassigned') AS agent_name, COUNT(t.id) AS count
-             FROM tickets t
-             LEFT JOIN users u ON t.agent_id = u.id -- USANDO agent_id
-             GROUP BY agent_name`
-        );
-        const ticketsByAgent = ticketsByAgentResult.map(row => ({
-            name: row.agent_name,
-            value: row.count
-        }));
-        console.log('[DEBUG DashboardController] Tickets por Agente:', ticketsByAgent);
-
-        // Total Users
+        // 6. Total Usuarios
         const [totalUsersResult] = await pool.execute('SELECT COUNT(*) AS count FROM users');
         const totalUsers = totalUsersResult[0].count;
-        console.log('[DEBUG DashboardController] Total Usuarios:', totalUsers);
 
-        // Total Departments
+        // 7. Total Departamentos
         const [totalDepartmentsResult] = await pool.execute('SELECT COUNT(*) AS count FROM departments');
         const totalDepartments = totalDepartmentsResult[0].count;
-        console.log('[DEBUG DashboardController] Total Departamentos:', totalDepartments);
 
-        // Reportes de tendencia (ejemplo: tickets creados por día)
-        const [ticketsCreatedOverTimeResult] = await pool.execute(
-            `SELECT DATE(created_at) AS date, COUNT(*) AS count
-             FROM tickets
-             GROUP BY DATE(created_at)
-             ORDER BY date ASC`
-        );
-        const ticketsCreatedOverTime = ticketsCreatedOverTimeResult.map(row => ({
-            date: row.date.toISOString().split('T')[0],
+        // 8. Tickets por Estado (para Pie Chart)
+        const [ticketsByStatusRaw] = await pool.execute('SELECT status, COUNT(*) AS count FROM tickets GROUP BY status');
+        const ticketsByStatus = ticketsByStatusRaw.map(row => ({ name: row.status, value: row.count }));
+
+        // 9. Tickets por Prioridad (para Pie Chart)
+        const [ticketsByPriorityRaw] = await pool.execute('SELECT priority, COUNT(*) AS count FROM tickets GROUP BY priority');
+        const ticketsByPriority = ticketsByPriorityRaw.map(row => ({ name: row.priority, value: row.count }));
+
+        // 10. Tickets Creados a lo largo del tiempo (ej. últimos 30 días)
+        const [ticketsCreatedOverTimeRaw] = await pool.execute(`
+            SELECT DATE(created_at) AS date, COUNT(*) AS count
+            FROM tickets
+            WHERE created_at >= CURDATE() - INTERVAL 30 DAY
+            GROUP BY date
+            ORDER BY date ASC
+        `);
+        const ticketsCreatedOverTime = ticketsCreatedOverTimeRaw.map(row => ({
+            date: row.date.toISOString().split('T')[0], // Formatear a 'YYYY-MM-DD'
             count: row.count
         }));
-        console.log('[DEBUG DashboardController] Tickets Creados por Día:', ticketsCreatedOverTime);
 
-        // Tickets por estado a lo largo del tiempo (ejemplo simplificado)
-        const [ticketsByStatusOverTimeResult] = await pool.execute(
-            `SELECT DATE(created_at) AS date,
-                    SUM(CASE WHEN status = 'open' THEN 1 ELSE 0 END) AS open,
-                    SUM(CASE WHEN status = 'in-progress' THEN 1 ELSE 0 END) AS inProgress,
-                    SUM(CASE WHEN status = 'resolved' THEN 1 ELSE 0 END) AS resolved,
-                    SUM(CASE WHEN status = 'closed' THEN 1 ELSE 0 END) AS closed
-             FROM tickets
-             GROUP BY DATE(created_at)
-             ORDER BY date ASC`
-        );
-        const ticketsByStatusOverTime = ticketsByStatusOverTimeResult.map(row => ({
+        // 11. Tickets por Estado a lo largo del tiempo (ej. últimos 30 días)
+        const [ticketsByStatusOverTimeRaw] = await pool.execute(`
+            SELECT
+                DATE(created_at) AS date,
+                SUM(CASE WHEN status = 'open' THEN 1 ELSE 0 END) AS open,
+                SUM(CASE WHEN status = 'in-progress' THEN 1 ELSE 0 END) AS inProgress,
+                SUM(CASE WHEN status = 'closed' OR status = 'resolved' THEN 1 ELSE 0 END) AS closed,
+                SUM(CASE WHEN status = 'reopened' THEN 1 ELSE 0 END) AS reopened
+            FROM tickets
+            WHERE created_at >= CURDATE() - INTERVAL 30 DAY
+            GROUP BY date
+            ORDER BY date ASC
+        `);
+        const ticketsByStatusOverTime = ticketsByStatusOverTimeRaw.map(row => ({
             date: row.date.toISOString().split('T')[0],
             open: row.open,
             inProgress: row.inProgress,
-            resolved: row.resolved,
             closed: row.closed,
+            reopened: row.reopened
         }));
-        console.log('[DEBUG DashboardController] Tickets por Estado a lo largo del tiempo:', ticketsByStatusOverTime);
 
-        // Tickets por prioridad a lo largo del tiempo (ejemplo simplificado)
-        const [ticketsByPriorityOverTimeResult] = await pool.execute(
-            `SELECT DATE(created_at) AS date,
-                    SUM(CASE WHEN priority = 'low' THEN 1 ELSE 0 END) AS low,
-                    SUM(CASE WHEN priority = 'medium' THEN 1 ELSE 0 END) AS medium,
-                    SUM(CASE WHEN priority = 'high' THEN 1 ELSE 0 END) AS high
-             FROM tickets
-             GROUP BY DATE(created_at)
-             ORDER BY date ASC`
-        );
-        const ticketsByPriorityOverTime = ticketsByPriorityOverTimeResult.map(row => ({
+        // 12. Tickets por Prioridad a lo largo del tiempo (ej. últimos 30 días)
+        const [ticketsByPriorityOverTimeRaw] = await pool.execute(`
+            SELECT
+                DATE(created_at) AS date,
+                SUM(CASE WHEN priority = 'low' THEN 1 ELSE 0 END) AS low,
+                SUM(CASE WHEN priority = 'medium' THEN 1 ELSE 0 END) AS medium,
+                SUM(CASE WHEN priority = 'high' THEN 1 ELSE 0 END) AS high,
+                SUM(CASE WHEN priority = 'urgent' THEN 1 ELSE 0 END) AS urgent
+            FROM tickets
+            WHERE created_at >= CURDATE() - INTERVAL 30 DAY
+            GROUP BY date
+            ORDER BY date ASC
+        `);
+        const ticketsByPriorityOverTime = ticketsByPriorityOverTimeRaw.map(row => ({
             date: row.date.toISOString().split('T')[0],
             low: row.low,
             medium: row.medium,
             high: row.high,
+            urgent: row.urgent
         }));
-        console.log('[DEBUG DashboardController] Tickets por Prioridad a lo largo del tiempo:', ticketsByPriorityOverTime);
 
-        // Rendimiento de Agentes (ejemplo simplificado)
-        const [agentPerformanceResult] = await pool.execute(
-            `SELECT COALESCE(u.username, 'unassigned') AS agentName,
-                    COUNT(CASE WHEN t.status = 'resolved' THEN 1 ELSE NULL END) AS resolvedTickets,
-                    AVG(TIMESTAMPDIFF(HOUR, t.created_at, t.closed_at)) AS avgResolutionTimeHours -- USANDO closed_at
-             FROM tickets t
-             LEFT JOIN users u ON t.agent_id = u.id -- USANDO agent_id
-             GROUP BY agentName`
-        );
-        const agentPerformance = agentPerformanceResult.map(row => ({
-            agentName: row.agentName,
-            resolvedTickets: row.resolvedTickets || 0,
-            avgResolutionTimeHours: row.avgResolutionTimeHours ? parseFloat(row.avgResolutionTimeHours.toFixed(2)) : 0
-        }));
-        console.log('[DEBUG DashboardController] Rendimiento de Agentes:', agentPerformance);
+        // 13. Rendimiento de Agentes
+        const [agentPerformanceRaw] = await pool.execute(`
+            SELECT
+                u.username AS agentName,
+                COUNT(t.id) AS resolvedTickets,
+                AVG(TIMESTAMPDIFF(HOUR, t.created_at, t.closed_at)) AS avgResolutionTimeHours
+            FROM users u
+            LEFT JOIN tickets t ON u.id = t.assigned_to_user_id
+            WHERE u.role = 'agent' AND (t.status = 'closed' OR t.status = 'resolved' OR t.id IS NULL)
+            GROUP BY u.id, u.username
+            ORDER BY resolvedTickets DESC
+        `);
+        const agentPerformance = agentPerformanceRaw.map(row => {
+            const avgTime = row.avgResolutionTimeHours;
+            // Asegurarse de que avgTime sea un número y no NaN antes de toFixed
+            const formattedAvgTime = (typeof avgTime === 'number' && !isNaN(avgTime)) ? parseFloat(avgTime.toFixed(2)) : null;
+            return {
+                agentName: row.agentName,
+                resolvedTickets: row.resolvedTickets || 0,
+                avgResolutionTimeHours: formattedAvgTime
+            };
+        });
 
-        // Rendimiento de Departamentos (ejemplo simplificado)
-        const [departmentPerformanceResult] = await pool.execute(
-            `SELECT d.name AS departmentName,
-                    COUNT(t.id) AS totalTickets,
-                    AVG(TIMESTAMPDIFF(HOUR, t.created_at, t.closed_at)) AS avgResolutionTimeHours -- USANDO closed_at
-             FROM tickets t
-             JOIN departments d ON t.department_id = d.id
-             GROUP BY departmentName`
-        );
-        const departmentPerformance = departmentPerformanceResult.map(row => ({
-            departmentName: row.departmentName,
-            totalTickets: row.totalTickets || 0,
-            avgResolutionTimeHours: row.avgResolutionTimeHours ? parseFloat(row.avgResolutionTimeHours.toFixed(2)) : 0
-        }));
-        console.log('[DEBUG DashboardController] Rendimiento de Departamentos:', departmentPerformance);
+        // 14. Rendimiento de Departamentos
+        const [departmentPerformanceRaw] = await pool.execute(`
+            SELECT
+                d.name AS departmentName,
+                COUNT(t.id) AS totalTickets,
+                AVG(TIMESTAMPDIFF(HOUR, t.created_at, t.closed_at)) AS avgResolutionTimeHours
+            FROM departments d
+            LEFT JOIN tickets t ON d.id = t.department_id
+            WHERE (t.status = 'closed' OR t.status = 'resolved' OR t.id IS NULL)
+            GROUP BY d.id, d.name
+            ORDER BY totalTickets DESC
+        `);
+        const departmentPerformance = departmentPerformanceRaw.map(row => {
+            const avgTime = row.avgResolutionTimeHours;
+            // Asegurarse de que avgTime sea un número y no NaN antes de toFixed
+            const formattedAvgTime = (typeof avgTime === 'number' && !isNaN(avgTime)) ? parseFloat(avgTime.toFixed(2)) : null;
+            return {
+                departmentName: row.departmentName,
+                totalTickets: row.totalTickets || 0,
+                avgResolutionTimeHours: formattedAvgTime
+            };
+        });
 
 
-        res.json({
+        res.status(200).json({
             totalTickets,
             openTickets,
             inProgressTickets,
-            resolvedTickets,
-            ticketsByStatus,
-            ticketsByPriority,
-            ticketsByAgent,
+            closedTickets,
+            reopenedTickets,
             totalUsers,
             totalDepartments,
+            ticketsByStatus,
+            ticketsByPriority,
             ticketsCreatedOverTime,
             ticketsByStatusOverTime,
             ticketsByPriorityOverTime,
             agentPerformance,
             departmentPerformance
         });
-        console.log('[DEBUG DashboardController] Métricas del dashboard enviadas exitosamente.');
 
     } catch (error) {
-        console.error('[DashboardController Error] Error al obtener métricas del dashboard:', error);
-        res.status(500);
-        throw new Error('Error del servidor al obtener métricas del dashboard');
+        console.error('Error del servidor al obtener métricas del dashboard:', error);
+        res.status(500).json({ message: 'Error del servidor al obtener métricas del dashboard.', stack: error.stack });
     }
 });
 
