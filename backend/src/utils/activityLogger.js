@@ -1,76 +1,59 @@
 // backend/src/utils/activityLogger.js
-const pool = require('../config/db'); // Ajusta la ruta si tu db.js está en otro lugar
+const pool = require('../config/db');
 
 /**
- * Registra una acción en la tabla activity_logs.
- * @param {number} userId - ID del usuario que realiza la acción.
- * @param {string} username - Nombre de usuario que realiza la acción.
- * @param {'user' | 'agent' | 'admin'} userRole - Rol del usuario.
- * @param {string} actionType - Tipo de acción (ej. 'ticket_created', 'user_updated').
- * @param {string} description - Descripción legible de la acción.
- * @param {'ticket' | 'user' | 'department' | 'system'} targetType - Tipo de entidad afectada.
- * @param {number | null} targetId - ID de la entidad afectada (null si no aplica).
- * @param {any | null} oldValue - Valor anterior (puede ser un objeto, se stringificará a JSON).
- * @param {any | null} newValue - Nuevo valor (puede ser un objeto, se stringificará a JSON).
+ * Registra una actividad en la base de datos.
+ * @param {number} userId - ID del usuario que realiza la actividad.
+ * @param {string} targetType - Tipo de entidad afectada (ej. 'ticket', 'user', 'department').
+ * @param {string} actionType - Tipo de acción realizada (ej. 'created', 'updated', 'deleted', 'login').
+ * @param {string} description - Descripción detallada de la actividad.
+ * @param {number | null} targetId - ID de la entidad afectada, si aplica.
+ * @param {object | null} oldValue - Valor anterior de la entidad (para actualizaciones), si aplica.
+ * @param {object | null} newValue - Nuevo valor de la entidad (para creaciones/actualizaciones), si aplica.
  */
-async function logActivity(
-    userId,
-    username,
-    userRole,
-    actionType,
-    description,
-    targetType,
-    targetId = null,
-    oldValue = null,
-    newValue = null
-) {
-    let connection;
+const createActivityLog = async (userId, targetType, actionType, description, targetId = null, oldValue = null, newValue = null) => {
     try {
-        console.log('[ACTIVITY LOGGER] Intentando obtener conexión del pool...');
-        connection = await pool.getConnection();
-        console.log('[ACTIVITY LOGGER] Conexión obtenida exitosamente.');
+        // Convierte objetos a JSON string si no son null
+        const oldValJson = oldValue ? JSON.stringify(oldValue) : null;
+        const newValJson = newValue ? JSON.stringify(newValue) : null;
 
-        if (!connection) { // Doble chequeo, aunque pool.getConnection() debería lanzar error si falla
-            console.error('[ACTIVITY LOGGER ERROR] No se pudo obtener una conexión a la base de datos.');
-            return; // Salir si no hay conexión
+        // Opcional: Obtener username y user_role desde la DB si no se pasan
+        let username = null;
+        let userRole = null;
+        if (userId) {
+            const [userRows] = await pool.execute('SELECT username, role FROM users WHERE id = ?', [userId]);
+            if (userRows.length > 0) {
+                username = userRows[0].username;
+                userRole = userRows[0].role;
+            }
         }
 
         const query = `
             INSERT INTO activity_logs
-            (user_id, user_username, user_role, action_type, description, target_type, target_id, old_value, new_value)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (user_id, user_username, user_role, activity_type, action_type, description, target_type, target_id, old_value, new_value)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `;
-
-        // Stringify los valores si son objetos/arrays para guardarlos como JSON en TEXT
-        const oldValString = oldValue !== null ? JSON.stringify(oldValue) : null;
-        const newValString = newValue !== null ? JSON.stringify(newValue) : null;
-
-        console.log('[ACTIVITY LOGGER] Ejecutando INSERT en activity_logs...');
-        await connection.execute(query, [
+        const values = [
             userId,
-            username,
-            userRole,
-            actionType,
+            username, // Usar el username obtenido o null
+            userRole, // Usar el rol obtenido o null
+            actionType, // activity_type es ahora actionType, ya que es lo que se usa en los controladores
+            actionType, // action_type
             description,
             targetType,
             targetId,
-            oldValString,
-            newValString
-        ]);
-        console.log(`[ACTIVITY LOGGER] Actividad registrada: ${description}`);
+            oldValJson,
+            newValJson,
+        ];
+
+        await pool.execute(query, values);
+        console.log('[ACTIVITY LOGGER] Actividad registrada:', description);
+
     } catch (error) {
         console.error('[ACTIVITY LOGGER ERROR] Error al registrar actividad:', error);
-        // Aquí podrías querer enviar una notificación de error a un sistema de monitoreo
-        // No re-lanzamos el error para no bloquear la operación principal (ej. actualizar ticket)
-    } finally {
-        if (connection) {
-            console.log('[ACTIVITY LOGGER] Liberando conexión del pool.');
-            connection.release(); // Libera la conexión de vuelta al pool
-        }
     }
-}
-
-module.exports = {
-    logActivity
 };
 
+module.exports = {
+    createActivityLog,
+};

@@ -1,13 +1,16 @@
-// backend/routes/dashboardRoutes.js
+// backend/src/routes/dashboardRoutes.js
 const express = require('express');
 const router = express.Router();
-const { protect } = require('../middleware/authMiddleware');
-// Importa el controlador de dashboard
-const { getDashboardMetrics } = require('../controllers/dashboardController'); 
+// CAMBIADO: Importa 'authenticateToken' en lugar de 'protect'
+const { authenticateToken, authorize } = require('../middleware/authMiddleware'); // <-- ¡CAMBIO AQUÍ!
 
-// @desc    Obtener métricas del dashboard para administradores
-// @route   GET /api/dashboard/metrics
-// @access  Private (Admin only)
-router.get('/metrics', protect, getDashboardMetrics); // Usa la función del controlador directamente
+const {
+    getDashboardMetrics,
+    getAgentDashboardMetrics
+} = require('../controllers/dashboardController');
+
+// Rutas para métricas del dashboard
+router.get('/metrics', authenticateToken, authorize('admin'), getDashboardMetrics); // <-- ¡CAMBIO AQUÍ!
+router.get('/agent-metrics/:userId', authenticateToken, authorize('agent', 'admin'), getAgentDashboardMetrics); // <-- ¡CAMBIO AQUÍ!
 
 module.exports = router;

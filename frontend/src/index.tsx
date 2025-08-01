@@ -1,6 +1,6 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
-import './index.css'; // Asegúrate de que este archivo exista y no tenga errores
+// REMOVED: import './index.css'; // This line is no longer needed as all custom CSS is migrated to Tailwind
 import App from './App';
 
 const root = ReactDOM.createRoot(

@@ -1,194 +1,196 @@
-// frontend/src/components/BacarKeys/BacarKeys.tsx
+// src/components/BacarKeys/BacarKeys.tsx
 import React, { useState, useEffect, useCallback } from 'react';
 import api from '../../config/axiosConfig';
-import { BacarKey } from '../../types'; 
 import { useAuth } from '../../context/AuthContext';
-import { useNotification } from '../../context/NotificationContext'; // <-- AÑADIDO: Importar useNotification
-import { isAxiosErrorTypeGuard, ApiResponseError } from '../../utils/typeGuards';
-import BacarKeyEditModal from './BacarKeyEditModal'; 
+import { useNotification } from '../../context/NotificationContext';
+import { BacarKey, ApiResponseError } from '../../types'; // Asegúrate de que BacarKey esté bien definido aquí
+import { isAxiosErrorTypeGuard } from '../../utils/typeGuards';
+
+// Importar el modal de edición/creación
+import BacarKeyEditModal from './BacarKeyEditModal'; // Asegúrate de que la ruta y el nombre del componente son correctos
+
+// Importar el modal de confirmación (asumo que tienes uno genérico)
+interface ConfirmModalProps {
+    isOpen: boolean;
+    onClose: () => void;
+    onConfirm: () => void;
+    title: string;
+    message: string;
+}
+
+const ConfirmModal: React.FC<ConfirmModalProps> = ({ isOpen, onClose, onConfirm, title, message }) => {
+    if (!isOpen) return null;
+
+    return (
+        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 flex justify-center items-center z-50">
+            <div className="bg-white p-6 rounded-lg shadow-xl w-full max-w-sm">
+                <h2 className="text-xl font-bold mb-4 text-gray-800">{title}</h2>
+                <p className="mb-6 text-gray-700">{message}</p>
+                <div className="flex justify-end gap-3">
+                    <button
+                        type="button"
+                        onClick={onClose}
+                        className="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-4 rounded-lg shadow-md transition duration-300 ease-in-out focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-opacity-75"
+                    >
+                        Cancelar
+                    </button>
+                    <button
+                        type="button"
+                        onClick={onConfirm}
+                        className="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg shadow-md transition duration-300 ease-in-out transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-opacity-75"
+                    >
+                        Confirmar
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+};
+
 
 const BacarKeys: React.FC = () => {
-    const { token, signOut } = useAuth(); // <-- MODIFICADO: Solo token y signOut de useAuth
-    const { addNotification } = useNotification(); // <-- AÑADIDO: addNotification de useNotification
+    const { token } = useAuth();
+    const { addNotification } = useNotification();
     const [bacarKeys, setBacarKeys] = useState<BacarKey[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
-    const [isEditModalOpen, setIsEditModalOpen] = useState(false);
-    const [selectedKey, setSelectedKey] = useState<BacarKey | null>(null);
-    const [passwordVisibility, setPasswordVisibility] = useState<Map<number, boolean>>(new Map());
+    const [isModalOpen, setIsModalOpen] = useState(false);
+    const [currentKey, setCurrentKey] = useState<BacarKey | null>(null);
+    const [isConfirmDeleteModalOpen, setIsConfirmDeleteModalOpen] = useState(false);
+    const [keyToDeleteId, setKeyToDeleteId] = useState<number | null>(null);
 
     const fetchBacarKeys = useCallback(async () => {
         setLoading(true);
         setError(null);
         try {
-            if (!token) {
-                throw new Error('No autorizado. Token no disponible.');
-            }
             const response = await api.get('/api/bacar-keys', {
                 headers: { Authorization: `Bearer ${token}` },
             });
-            setBacarKeys(response.data || []);
+            // Asumiendo que la respuesta es un array de BacarKey
+            setBacarKeys(response.data);
         } catch (err: unknown) {
+            console.error('Error fetching Bacar keys:', err);
             if (isAxiosErrorTypeGuard(err)) {
                 const apiError = err.response?.data as ApiResponseError;
                 setError(apiError?.message || 'Error al cargar las claves Bacar.');
-                addNotification(`Error al cargar claves: ${apiError?.message || 'Error desconocido'}`, 'error');
-                if (err.response?.status === 401) signOut();
+                addNotification(`Error al cargar claves Bacar: ${apiError?.message || 'Error desconocido'}`, 'error');
             } else {
-                setError('Ocurrió un error inesperado al cargar las claves Bacar.');
+                setError('Ocurrió un error inesperado al cargar las claves Bacar.'); // CORREGIDO: setError con 1 argumento
+                addNotification('Ocurrió un error inesperado al cargar las claves Bacar.', 'error');
             }
-            console.error('Error fetching Bacar Keys:', err);
         } finally {
             setLoading(false);
         }
-    }, [token, addNotification, signOut]);
+    }, [token, addNotification]);
 
     useEffect(() => {
         fetchBacarKeys();
     }, [fetchBacarKeys]);
 
-    const handleCreateKey = () => {
-        setSelectedKey(null);
-        setIsEditModalOpen(true);
+    const openCreateModal = () => {
+        setCurrentKey(null);
+        setIsModalOpen(true);
     };
 
-    const handleEditKey = (key: BacarKey) => {
-        setSelectedKey(key);
-        setIsEditModalOpen(true);
+    const openEditModal = (key: BacarKey) => {
+        setCurrentKey(key);
+        setIsModalOpen(true);
     };
 
-    const handleKeyUpdatedOrCreated = () => {
-        setIsEditModalOpen(false);
-        fetchBacarKeys();
+    const openConfirmDeleteModal = (id: number) => {
+        setKeyToDeleteId(id);
+        setIsConfirmDeleteModalOpen(true);
     };
 
-    const handleDeleteKey = async (keyId: number) => {
-        const confirmed = window.confirm('¿Estás seguro de que quieres eliminar esta clave Bacar?');
-        if (!confirmed) return;
-
+    const handleDelete = async () => {
+        if (!keyToDeleteId || !token) return;
         setLoading(true);
         setError(null);
         try {
-            if (!token) {
-                throw new Error('No autorizado. Token no disponible.');
-            }
-            await api.delete(`/api/bacar-keys/${keyId}`, {
+            await api.delete(`/api/bacar-keys/${keyToDeleteId}`, {
                 headers: { Authorization: `Bearer ${token}` },
             });
             addNotification('Clave Bacar eliminada exitosamente.', 'success');
-            fetchBacarKeys();
+            fetchBacarKeys(); // Recargar la lista después de eliminar
         } catch (err: unknown) {
+            console.error('Error deleting Bacar key:', err);
             if (isAxiosErrorTypeGuard(err)) {
                 const apiError = err.response?.data as ApiResponseError;
-                setError(apiError?.message || 'Error al eliminar clave Bacar.');
-                addNotification(`Error al eliminar clave: ${apiError?.message || 'Error desconocido'}`, 'error');
-                if (err.response?.status === 401) signOut();
+                setError(apiError?.message || 'Error al eliminar la clave Bacar.');
+                addNotification(`Error al eliminar clave Bacar: ${apiError?.message || 'Error desconocido'}`, 'error');
             } else {
-                setError('Ocurrió un error inesperado al eliminar la clave Bacar.');
+                setError('Ocurrió un error inesperado al eliminar la clave Bacar.'); // CORREGIDO: setError con 1 argumento
+                addNotification('Ocurrió un error inesperado al eliminar la clave Bacar.', 'error');
             }
-            console.error('Error deleting Bacar Key:', err);
         } finally {
             setLoading(false);
+            setIsConfirmDeleteModalOpen(false);
+            setKeyToDeleteId(null);
         }
     };
 
-    const togglePasswordVisibility = (keyId: number) => {
-        setPasswordVisibility(prev => {
-            const newMap = new Map(prev);
-            newMap.set(keyId, !newMap.get(keyId));
-            return newMap;
-        });
-    };
-
-    const formatTimestamp = (timestamp: string) => {
-        return new Date(timestamp).toLocaleString();
-    };
-
     if (loading) {
-        return (
-            <div className="loading-message">🔄 Cargando claves Bacar...</div>
-        );
+        return <div className="flex justify-center items-center h-full"><span className="text-lg">Cargando claves Bacar...</span></div>;
     }
 
     if (error) {
-        return (
-            <div className="error-message text-center p-4">
-                <p>{error}</p>
-                <button onClick={fetchBacarKeys} className="button primary-button mt-2">Reintentar</button>
-            </div>
-        );
+        return <div className="text-red-500 text-center p-4">Error: {error}</div>;
     }
 
     return (
-        <div className="bacar-keys-management">
-            <h2 className="text-2xl font-bold text-primary-color mb-4 text-center">Gestión de Claves Bacar</h2>
-            <p className="info-text text-center mb-6">Administra las claves de acceso a dispositivos Bacar.</p>
+        <div className="container mx-auto p-4 sm:p-6 lg:p-8">
+            <h1 className="text-3xl font-bold text-gray-800 mb-6 border-b-2 border-blue-300 pb-2">Gestión de Claves Bacar</h1>
 
-            <div className="flex justify-end mb-4">
-                <button onClick={handleCreateKey} className="button primary-button">
-                    Crear Nueva Clave
-                </button>
-            </div>
+            <button
+                onClick={openCreateModal}
+                className="mb-6 bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg shadow-md transition duration-300 ease-in-out transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-75"
+            >
+                Añadir Nueva Clave Bacar
+            </button>
 
-            {bacarKeys.length > 0 ? (
-                <div className="table-responsive">
-                    <table className="data-table">
-                        <thead>
+            {bacarKeys.length === 0 ? (
+                <p className="text-gray-600">No hay claves Bacar registradas.</p>
+            ) : (
+                <div className="overflow-x-auto bg-white shadow-lg rounded-lg">
+                    <table className="min-w-full divide-y divide-gray-200">
+                        <thead className="bg-blue-100">
                             <tr>
-                                <th>ID</th>
-                                <th>Usuario Dispositivo</th>
-                                <th>Usuario Login</th>
-                                <th>Contraseña</th>
-                                <th>Notas</th>
-                                <th>Creado por</th>
-                                <th>Fecha Creación</th>
-                                <th>Última Actualización</th>
-                                <th>Acciones</th>
+                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">ID</th>
+                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">Usuario Dispositivo</th>
+                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">Usuario</th>
+                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">Contraseña</th>
+                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">Notas</th>
+                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">Creado Por</th>
+                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">Creado En</th>
+                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">Actualizado En</th>
+                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">Acciones</th>
                             </tr>
                         </thead>
-                        <tbody>
+                        <tbody className="bg-white divide-y divide-gray-200">
                             {bacarKeys.map((key) => (
-                                <tr key={key.id}>
-                                    <td>{key.id}</td>
-                                    <td className="font-mono text-sm">{key.device_user}</td>
-                                    <td className="font-mono text-sm">{key.username}</td>
-                                    <td>
-                                        <div className="flex items-center">
-                                            <span className="font-mono text-sm mr-2">
-                                                {passwordVisibility.get(key.id) ? key.password : '********'}
-                                            </span>
-                                            <button
-                                                onClick={() => togglePasswordVisibility(key.id)}
-                                                className="text-gray-500 hover:text-primary-color transition-colors duration-200"
-                                                title={passwordVisibility.get(key.id) ? 'Ocultar contraseña' : 'Mostrar contraseña'}
-                                            >
-                                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
-                                                    {passwordVisibility.get(key.id) ? (
-                                                        <path d="M10.5 8a2.5 2.5 0 1 1-5 0 2.5 2.5 0 0 1 5 0z"/>
-                                                    ) : (
-                                                        <path d="M10.5 8a2.5 2.5 0 1 1-5 0 2.5 2.5 0 0 1 5 0z"/>
-                                                    )}
-                                                    <path d="M0 8s3-5.5 8-5.5S16 8 16 8s-3 5.5-8 5.5S0 8 0 8zm8 3.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7z"/>
-                                                </svg>
-                                            </button>
-                                        </div>
-                                    </td>
-                                    <td>{key.notes || 'N/A'}</td>
-                                    <td>{key.created_by_username || 'Sistema'}</td>
-                                    <td>{formatTimestamp(key.created_at)}</td>
-                                    <td>{formatTimestamp(key.updated_at)}</td>
-                                    <td className="actions-column">
+                                <tr key={key.id} className="hover:bg-gray-50">
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{key.id}</td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{key.device_user}</td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{key.username}</td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{key.password}</td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{key.notes || 'N/A'}</td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{key.created_by_username}</td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{new Date(key.created_at).toLocaleString()}</td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{new Date(key.updated_at).toLocaleString()}</td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                                         <button
-                                            onClick={() => handleEditKey(key)}
-                                            className="button small-button secondary-button mr-2"
+                                            onClick={() => openEditModal(key)}
+                                            className="text-blue-600 hover:text-blue-900 mr-3 transition duration-150 ease-in-out"
+                                            title="Editar"
                                         >
-                                            Editar
+                                            <svg className="w-5 h-5 inline-block" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-7-7l-4 4m4-4l4 4m-4-4l9.293 9.293a1 1 0 01-1.414 1.414L11 7.414V11a1 1 0 102 0V7.414l1.293 1.293a1 1 0 001.414-1.414L11 3.586z"></path></svg>
                                         </button>
                                         <button
-                                            onClick={() => handleDeleteKey(key.id)}
-                                            className="button small-button delete-button"
+                                            onClick={() => openConfirmDeleteModal(key.id)}
+                                            className="text-red-600 hover:text-red-900 transition duration-150 ease-in-out"
+                                            title="Eliminar"
                                         >
-                                            Eliminar
+                                            <svg className="w-5 h-5 inline-block" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
                                         </button>
                                     </td>
                                 </tr>
@@ -196,17 +198,24 @@ const BacarKeys: React.FC = () => {
                         </tbody>
                     </table>
                 </div>
-            ) : (
-                <p className="info-text">No hay claves Bacar registradas.</p>
             )}
 
-            {isEditModalOpen && (
+            {isModalOpen && (
                 <BacarKeyEditModal
-                    isOpen={isEditModalOpen}
-                    onClose={() => setIsEditModalOpen(false)}
-                    keyToEdit={selectedKey}
-                    onKeyUpdated={handleKeyUpdatedOrCreated}
-                    token={token}
+                    isOpen={isModalOpen}
+                    onClose={() => setIsModalOpen(false)}
+                    onSaveSuccess={fetchBacarKeys} // Pasar la función de recarga
+                    initialData={currentKey}
+                />
+            )}
+
+            {isConfirmDeleteModalOpen && (
+                <ConfirmModal
+                    isOpen={isConfirmDeleteModalOpen}
+                    onClose={() => setIsConfirmDeleteModalOpen(false)}
+                    onConfirm={handleDelete}
+                    title="Confirmar Eliminación"
+                    message="¿Estás seguro de que quieres eliminar esta clave Bacar? Esta acción no se puede deshacer."
                 />
             )}
         </div>

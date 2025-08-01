@@ -1,17 +1,17 @@
+// src/components/Users/UserList.tsx
 import React, { useState, useEffect, useCallback } from 'react';
-import userService, { NewUser, UpdateUser } from '../../services/userService'; 
-// Eliminadas las importaciones de react-icons/fa
-import axios from 'axios';
+import userService, { NewUser, UpdateUser } from '../../services/userService'; // Importa NewUser y UpdateUser desde userService
+import axios from 'axios'; // Asegúrate de que esto es 'axios' y no tu instancia 'api' si no quieres el interceptor de 401 aquí
 import { useAuth } from '../../context/AuthContext';
-import { useNotification } from '../../context/NotificationContext'; // <-- AÑADIDO: Importar useNotification
+import { useNotification } from '../../context/NotificationContext';
 import { isAxiosErrorTypeGuard, ApiResponseError } from '../../utils/typeGuards';
-import { Department, User } from '../../types'; 
+import { Department, User } from '../../types';
 
 const UserList: React.FC = () => {
-    const { token } = useAuth(); // <-- MODIFICADO: Solo token de useAuth
-    const { addNotification } = useNotification(); // <-- AÑADIDO: addNotification de useNotification
+    const { token } = useAuth();
+    const { addNotification } = useNotification();
     const [users, setUsers] = useState<User[]>([]);
-    const [departments, setDepartments] = useState<Department[]>([]); 
+    const [departments, setDepartments] = useState<Department[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [isModalOpen, setIsModalOpen] = useState(false);
@@ -19,8 +19,12 @@ const UserList: React.FC = () => {
     const [newUsername, setNewUsername] = useState('');
     const [newEmail, setNewEmail] = useState('');
     const [newPassword, setNewPassword] = useState('');
-    const [newRole, setNewRole] = useState<'admin' | 'agent' | 'client'>('client'); 
+    const [newRole, setNewRole] = useState<'admin' | 'agent' | 'client'>('client');
     const [newDepartmentId, setNewDepartmentId] = useState<number | null>(null);
+
+    // --- NUEVO ESTADO PARA EL MODAL DE CONFIRMACIÓN ---
+    const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false);
+    const [userToDelete, setUserToDelete] = useState<{ id: number; username: string } | null>(null);
 
     const fetchUsersAndDepartments = useCallback(async () => {
         setLoading(true);
@@ -32,7 +36,7 @@ const UserList: React.FC = () => {
                 return;
             }
             const [usersData, departmentsData] = await Promise.all([
-                userService.getAllUsers(token), 
+                userService.getAllUsers(token),
                 axios.get('/api/departments', { headers: { Authorization: `Bearer ${token}` } }).then(res => res.data.departments)
             ]);
             setUsers(usersData);
@@ -44,6 +48,7 @@ const UserList: React.FC = () => {
                 addNotification(`Error al cargar: ${apiError?.message || 'Error desconocido'}`, 'error');
             } else {
                 setError('Ocurrió un error inesperado al cargar los datos.');
+                addNotification('Ocurrió un error inesperado al cargar los datos.', 'error');
             }
             console.error('Error fetching users or departments:', err);
         } finally {
@@ -57,8 +62,9 @@ const UserList: React.FC = () => {
 
     const handleCreateUser = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (!newUsername.trim() || !newEmail.trim() || (!currentUser && !newPassword.trim())) { // Added !currentUser check for password
-            addNotification('Todos los campos son obligatorios para crear un usuario, incluida la contraseña.', 'warning');
+        // La validación de contraseña para creación de usuario debe ser estricta
+        if (!newUsername.trim() || !newEmail.trim() || !newPassword.trim()) {
+            addNotification('Todos los campos son obligatorios para crear un usuario (incluida la contraseña).', 'warning');
             return;
         }
         setLoading(true);
@@ -66,16 +72,18 @@ const UserList: React.FC = () => {
         try {
             if (!token) {
                 addNotification('No autorizado para crear usuario.', 'error');
+                setLoading(false); // Asegurarse de desactivar loading en caso de retorno temprano
                 return;
             }
-            const newUser: NewUser = { 
+            const newUser: NewUser = {
                 username: newUsername,
                 email: newEmail,
                 password: newPassword,
                 role: newRole,
                 department_id: newDepartmentId,
             };
-            await userService.createUser(token, newUser); 
+            // CORREGIDO: El orden de los argumentos para createUser
+            await userService.createUser(newUser, token);
             addNotification('Usuario creado exitosamente.', 'success');
             setIsModalOpen(false);
             setNewUsername('');
@@ -91,6 +99,7 @@ const UserList: React.FC = () => {
                 addNotification(`Error al crear usuario: ${apiError?.message || 'Error desconocido'}`, 'error');
             } else {
                 setError('Ocurrió un error inesperado al crear el usuario.');
+                addNotification('Ocurrió un error inesperado al crear el usuario.', 'error');
             }
             console.error('Error creating user:', err);
         } finally {
@@ -103,8 +112,8 @@ const UserList: React.FC = () => {
         setNewUsername(user.username);
         setNewEmail(user.email);
         setNewRole(user.role);
-        setNewDepartmentId(user.department_id); 
-        setNewPassword(''); 
+        setNewDepartmentId(user.department_id);
+        setNewPassword(''); // Limpiar la contraseña al editar para que no se envíe si no se modifica
         setIsModalOpen(true);
     };
 
@@ -119,18 +128,20 @@ const UserList: React.FC = () => {
         try {
             if (!token) {
                 addNotification('No autorizado para actualizar usuario.', 'error');
+                setLoading(false); // Asegurarse de desactivar loading en caso de retorno temprano
                 return;
             }
-            const updatedUser: UpdateUser = { 
+            const updatedUser: UpdateUser = {
                 username: newUsername,
                 email: newEmail,
                 role: newRole,
                 department_id: newDepartmentId,
             };
-            if (newPassword) { 
+            if (newPassword) { // Solo añadir la contraseña si se ha modificado
                 updatedUser.password = newPassword;
             }
-            await userService.updateUser(token, currentUser.id, updatedUser); 
+            // CORREGIDO: El orden de los argumentos para updateUser
+            await userService.updateUser(currentUser.id, updatedUser, token);
             addNotification('Usuario actualizado exitosamente.', 'success');
             setIsModalOpen(false);
             setCurrentUser(null);
@@ -147,6 +158,7 @@ const UserList: React.FC = () => {
                 addNotification(`Error al actualizar usuario: ${apiError?.message || 'Error desconocido'}`, 'error');
             } else {
                 setError('Ocurrió un error inesperado al actualizar el usuario.');
+                addNotification('Ocurrió un error inesperado al actualizar el usuario.', 'error');
             }
             console.error('Error updating user:', err);
         } finally {
@@ -154,30 +166,42 @@ const UserList: React.FC = () => {
         }
     };
 
-    const handleDeleteUser = async (id: number, username: string) => {
-        if (window.confirm(`¿Estás seguro de que quieres eliminar al usuario ${username}? Esta acción es irreversible.`)) {
-            setLoading(true);
-            setError(null);
-            try {
-                if (!token) {
-                    addNotification('No autorizado para eliminar usuario.', 'error');
-                    return;
-                }
-                await userService.deleteUser(token, id);
-                addNotification(`Usuario ${username} eliminado exitosamente.`, 'success');
-                fetchUsersAndDepartments();
-            } catch (err: unknown) {
-                if (isAxiosErrorTypeGuard(err)) {
-                    const apiError = err.response?.data as ApiResponseError;
-                    setError(apiError?.message || 'Error al eliminar usuario.');
-                    addNotification(`Error al eliminar usuario: ${apiError?.message || 'Error desconocido'}`, 'error');
-                } else {
-                    setError('Ocurrió un error inesperado al eliminar el usuario.');
-                }
-                console.error('Error deleting user:', err);
-            } finally {
-                setLoading(false);
+    // --- MODIFICADO: Función para abrir el modal de confirmación ---
+    const handleDeleteClick = (id: number, username: string) => {
+        setUserToDelete({ id, username });
+        setIsConfirmModalOpen(true);
+    };
+
+    // --- NUEVO: Función para confirmar y ejecutar la eliminación ---
+    const confirmDeleteUser = async () => {
+        if (!userToDelete) return; // No hay usuario para eliminar
+
+        setIsConfirmModalOpen(false); // Cerrar el modal de confirmación
+        setLoading(true);
+        setError(null);
+        try {
+            if (!token) {
+                addNotification('No autorizado para eliminar usuario.', 'error');
+                setLoading(false); // Asegurarse de desactivar loading en caso de retorno temprano
+                return;
             }
+            // CORREGIDO: El orden de los argumentos para deleteUser
+            await userService.deleteUser(userToDelete.id, token);
+            addNotification(`Usuario ${userToDelete.username} eliminado exitosamente.`, 'success');
+            fetchUsersAndDepartments();
+        } catch (err: unknown) {
+            if (isAxiosErrorTypeGuard(err)) {
+                const apiError = err.response?.data as ApiResponseError;
+                setError(apiError?.message || 'Error al eliminar usuario.');
+                addNotification(`Error al eliminar usuario: ${apiError?.message || 'Error desconocido'}`, 'error');
+            } else {
+                setError('Ocurrió un error inesperado al eliminar el usuario.');
+                addNotification('Ocurrió un error inesperado al eliminar el usuario.', 'error');
+            }
+            console.error('Error deleting user:', err);
+        } finally {
+            setLoading(false);
+            setUserToDelete(null); // Limpiar el usuario después de la operación
         }
     };
 
@@ -219,7 +243,7 @@ const UserList: React.FC = () => {
                     <table className="min-w-full divide-y divide-gray-200">
                         <thead className="bg-gray-50">
                             <tr>
-                                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">ID</th>
+                            <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">ID</th>
                                 <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Usuario</th>
                                 <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Email</th>
                                 <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Rol</th>
@@ -234,7 +258,7 @@ const UserList: React.FC = () => {
                                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{user.username}</td>
                                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{user.email}</td>
                                     <td className="px-6 py-4 whitespace-nowrap text-sm">
-                                        <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full 
+                                        <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full
                                             ${user.role === 'admin' ? 'bg-purple-100 text-purple-800' : ''}
                                             ${user.role === 'agent' ? 'bg-red-100 text-red-800' : ''}
                                             ${user.role === 'client' ? 'bg-blue-100 text-blue-800' : ''}
@@ -255,7 +279,7 @@ const UserList: React.FC = () => {
                                             </svg> Editar
                                         </button>
                                         <button
-                                            onClick={() => handleDeleteUser(user.id, user.username)}
+                                            onClick={() => handleDeleteClick(user.id, user.username)} /* MODIFICADO: Llama a handleDeleteClick */
                                             className="text-red-600 hover:text-red-900"
                                             title="Eliminar Usuario"
                                         >
@@ -309,7 +333,7 @@ const UserList: React.FC = () => {
                             </div>
                             <div className="mb-4">
                                 <label htmlFor="password" className="block text-gray-700 text-sm font-bold mb-2">
-                                    Contraseña:
+                                    Contraseña: {currentUser ? '(dejar vacío para no cambiar)' : ''}
                                 </label>
                                 <input
                                     type="password"
@@ -338,24 +362,28 @@ const UserList: React.FC = () => {
                                     <option value="admin">Administrador</option>
                                 </select>
                             </div>
-                            <div className="mb-4">
-                                <label htmlFor="department" className="block text-gray-700 text-sm font-bold mb-2">
-                                    Departamento (solo para Agentes):
-                                </label>
-                                <select
-                                    id="department"
-                                    name="department_id" 
-                                    className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
-                                    value={newDepartmentId || ''}
-                                    onChange={(e) => setNewDepartmentId(parseInt(e.target.value) || null)}
-                                    disabled={newRole !== 'agent'}
-                                >
-                                    <option value="">Seleccionar Departamento</option>
-                                    {departments.map(dept => (
-                                        <option key={dept.id} value={dept.id}>{dept.name}</option>
-                                    ))}
-                                </select>
-                            </div>
+                            {newRole === 'agent' && (
+                                <div className="mb-4">
+                                    <label htmlFor="department" className="block text-gray-700 text-sm font-bold mb-2">
+                                        Departamento (solo para Agentes):
+                                    </label>
+                                    <select
+                                        id="department"
+                                        name="department_id"
+                                        className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                                        value={newDepartmentId || ''}
+                                        onChange={(e) => setNewDepartmentId(parseInt(e.target.value) || null)}
+                                        disabled={newRole !== 'agent'}
+                                    >
+                                        <option value="">Seleccionar Departamento</option>
+                                        {departments.map(dept => (
+                                            <option key={dept.id} value={dept.id}>
+                                                {dept.name}
+                                            </option>
+                                        ))}
+                                    </select>
+                                </div>
+                            )}
                             <div className="flex justify-end space-x-4">
                                 <button
                                     type="button"
@@ -374,6 +402,38 @@ const UserList: React.FC = () => {
                                 </button>
                             </div>
                         </form>
+                    </div>
+                </div>
+            )}
+
+            {/* --- NUEVO: Modal de Confirmación de Eliminación --- */}
+            {isConfirmModalOpen && userToDelete && (
+                <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full flex justify-center items-center z-50">
+                    <div className="bg-white p-6 rounded-lg shadow-xl w-full max-w-sm">
+                        <h3 className="text-xl font-bold mb-4 text-gray-800">Confirmar Eliminación</h3>
+                        <p className="mb-6 text-gray-700">
+                            ¿Estás seguro de que quieres eliminar al usuario **{userToDelete.username}**? Esta acción es irreversible.
+                        </p>
+                        <div className="flex justify-end space-x-4">
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setIsConfirmModalOpen(false);
+                                    setUserToDelete(null);
+                                }}
+                                className="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-4 rounded-md transition-colors duration-200"
+                            >
+                                Cancelar
+                            </button>
+                            <button
+                                type="button"
+                                onClick={confirmDeleteUser}
+                                className="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-md transition-colors duration-200"
+                                disabled={loading}
+                            >
+                                {loading ? 'Eliminando...' : 'Eliminar'}
+                            </button>
+                        </div>
                     </div>
                 </div>
             )}

@@ -1,584 +1,611 @@
 // backend/src/controllers/ticketController.js
-const asyncHandler = require('express-async-handler');
 const pool = require('../config/db');
-const { logActivity } = require('../utils/activityLogger');
-const { createNotification } = require('../utils/notificationUtils');
+const asyncHandler = require('express-async-handler'); // Usar express-async-handler
+const { logActivity } = require('../services/activityLogService'); // Importar SOLO este servicio de log
 
-// @desc    Obtener todos los tickets
+// @desc    Get all tickets
 // @route   GET /api/tickets
-// @access  Private
+// @access  Admin, Agent, Client (with filters)
 const getAllTickets = asyncHandler(async (req, res) => {
-    if (!req.user) {
-        res.status(401);
-        throw new Error('No autorizado');
-    }
+    const { status, priority, department_id, assigned_to_user_id, user_id, limit, offset, sort_by, sort_order, title } = req.query;
+    const authenticatedUserId = req.user.id;
+    const authenticatedUserRole = req.user.role;
 
     let query = `
         SELECT
-            t.id,
-            t.title,
-            t.description,
-            t.status,
-            t.priority,
-            t.department_id,
-            d.name AS department_name,
-            t.user_id,
+            t.*,
             u.username AS user_username,
-            u.email AS user_email,
-            t.assigned_to_user_id, -- Usar assigned_to_user_id
+            d.name AS department_name,
             a.username AS agent_username,
-            a.email AS agent_email,
-            t.created_at,
-            t.updated_at,
-            t.closed_at
-        FROM
-            tickets t
-        LEFT JOIN
-            users u ON t.user_id = u.id
-        LEFT JOIN
-            users a ON t.assigned_to_user_id = a.id -- Unir por assigned_to_user_id
-        LEFT JOIN
-            departments d ON t.department_id = d.id
+            tf.id AS feedback_id, tf.rating AS feedback_rating, tf.comment AS feedback_comment, tf.created_at AS feedback_created_at
+        FROM tickets t
+        LEFT JOIN users u ON t.user_id = u.id
+        LEFT JOIN departments d ON t.department_id = d.id
+        LEFT JOIN users a ON t.assigned_to_user_id = a.id
+        LEFT JOIN ticket_feedback tf ON t.id = tf.ticket_id -- <-- ¡CLAVE! JOIN para obtener el feedback
     `;
-    const whereClauses = [];
     const queryParams = [];
+    const whereClauses = [];
 
-    if (req.user.role === 'client') {
+    // Lógica de autorización para clientes: Un cliente solo puede ver sus propios tickets.
+    if (authenticatedUserRole === 'client') {
         whereClauses.push('t.user_id = ?');
-        queryParams.push(req.user.id);
-    } else if (req.user.role === 'agent') {
-        whereClauses.push('(t.assigned_to_user_id = ? OR t.assigned_to_user_id IS NULL)'); // Usar assigned_to_user_id
-        queryParams.push(req.user.id);
+        queryParams.push(authenticatedUserId);
+    } else {
+        // Para admin/agente, aplicar filtro user_id si se proporciona en la query.
+        if (user_id) {
+            whereClauses.push('t.user_id = ?');
+            queryParams.push(user_id);
+        }
     }
 
-    const { status, priority, department_id, agent_id, search } = req.query;
-
-    if (status && status !== 'all') {
-        whereClauses.push('t.status = ?');
-        queryParams.push(status);
+    // Otros filtros
+    if (status) {
+        const statuses = status.split(',');
+        const statusPlaceholders = statuses.map(() => '?').join(',');
+        whereClauses.push(`t.status IN (${statusPlaceholders})`);
+        queryParams.push(...statuses);
     }
-
-    if (priority && priority !== 'all') {
-        whereClauses.push('t.priority = ?');
-        queryParams.push(priority);
+    if (priority) {
+        const priorities = priority.split(',');
+        const priorityPlaceholders = priorities.map(() => '?').join(',');
+        whereClauses.push(`t.priority IN (${priorityPlaceholders})`);
+        queryParams.push(...priorities);
     }
-
-    if (department_id && department_id !== 'all') {
+    if (department_id) {
         whereClauses.push('t.department_id = ?');
         queryParams.push(department_id);
     }
-
-    if (agent_id && agent_id !== 'all') {
-        if (agent_id === 'unassigned' || agent_id === 'null') {
-            whereClauses.push('t.assigned_to_user_id IS NULL'); // Usar assigned_to_user_id
-        } else {
-            whereClauses.push('t.assigned_to_user_id = ?'); // Usar assigned_to_user_id
-            queryParams.push(parseInt(agent_id));
-        }
+    if (assigned_to_user_id) {
+        whereClauses.push('t.assigned_to_user_id = ?');
+        queryParams.push(assigned_to_user_id);
     }
-
-    if (search) {
-        const searchTerm = `%${search}%`;
-        whereClauses.push('(t.title LIKE ? OR t.description LIKE ? OR u.username LIKE ? OR a.username LIKE ?)');
-        queryParams.push(searchTerm, searchTerm, searchTerm, searchTerm);
+    if (title) { // Añadir filtro por título
+        whereClauses.push('t.title LIKE ?');
+        queryParams.push(`%${title}%`);
     }
 
     if (whereClauses.length > 0) {
-        query += ' WHERE ' + whereClauses.join(' AND ');
+        query += ` WHERE ${whereClauses.join(' AND ')}`;
     }
 
-    query += ' ORDER BY t.created_at DESC';
+    // Sorting
+    const validSortColumns = ['id', 'title', 'status', 'priority', 'created_at', 'updated_at', 'closed_at'];
+    const orderByColumn = (sort_by && validSortColumns.includes(sort_by)) ? sort_by : 'created_at';
+    const orderDirection = (sort_order && ['ASC', 'DESC'].includes(sort_order.toUpperCase())) ? sort_order.toUpperCase() : 'DESC';
+    query += ` ORDER BY t.${orderByColumn} ${orderDirection}`;
 
-    console.log('[DEBUG getAllTickets] Ejecutando consulta de tickets...');
-    const [tickets] = await pool.query(query, queryParams);
-    console.log('[DEBUG getAllTickets] Consulta de tickets completada.');
+    // Pagination
+    const limitNum = parseInt(limit, 10) || 10;
+    const offsetNum = parseInt(offset, 10) || 0;
+    query += ` LIMIT ? OFFSET ?`;
+    queryParams.push(limitNum, offsetNum);
 
-    res.status(200).json({ tickets });
+    const [rawTickets] = await pool.execute(query, queryParams);
+
+    // Formatear los tickets para incluir el objeto feedback
+    const tickets = rawTickets.map(ticket => {
+        const formattedTicket = {
+            id: ticket.id,
+            title: ticket.title,
+            description: ticket.description,
+            status: ticket.status,
+            priority: ticket.priority,
+            department_id: ticket.department_id,
+            department_name: ticket.department_name,
+            user_id: ticket.user_id,
+            user_username: ticket.user_username,
+            assigned_to_user_id: ticket.assigned_to_user_id,
+            agent_username: ticket.agent_username,
+            created_at: ticket.created_at,
+            updated_at: ticket.updated_at,
+            closed_at: ticket.closed_at,
+            feedback: null // Inicializar feedback como null
+        };
+
+        // Si hay datos de feedback (es decir, feedback_id no es null), adjuntarlos
+        if (ticket.feedback_id) {
+            formattedTicket.feedback = {
+                id: ticket.feedback_id,
+                ticket_id: ticket.id,
+                user_id: ticket.user_id, // El user_id del feedback es el cliente que lo envió
+                rating: ticket.feedback_rating,
+                comment: ticket.feedback_comment,
+                created_at: ticket.feedback_created_at
+            };
+        }
+        return formattedTicket;
+    });
+
+
+    // Para obtener el total de tickets sin el límite/offset para la paginación
+    let countQuery = `SELECT COUNT(*) AS total FROM tickets t`;
+    const countQueryParams = [];
+    
+    // Replicar la lógica de filtrado para el contador
+    const countWhereClauses = [];
+    if (authenticatedUserRole === 'client') {
+        countWhereClauses.push('t.user_id = ?');
+        countQueryParams.push(authenticatedUserId);
+    } else {
+        if (user_id) {
+            countWhereClauses.push('t.user_id = ?');
+            countQueryParams.push(user_id);
+        }
+    }
+    if (status) {
+        const statuses = status.split(',');
+        const statusPlaceholders = statuses.map(() => '?').join(',');
+        countWhereClauses.push(`t.status IN (${statusPlaceholders})`);
+        countQueryParams.push(...statuses);
+    }
+    if (priority) {
+        const priorities = priority.split(',');
+        const priorityPlaceholders = priorities.map(() => '?').join(',');
+        countWhereClauses.push(`t.priority IN (${priorityPlaceholders})`);
+        countQueryParams.push(...priorities);
+    }
+    if (department_id) {
+        countWhereClauses.push('t.department_id = ?');
+        countQueryParams.push(department_id);
+    }
+    if (assigned_to_user_id) {
+        countWhereClauses.push('t.assigned_to_user_id = ?');
+        countQueryParams.push(assigned_to_user_id);
+    }
+    if (title) {
+        countWhereClauses.push('t.title LIKE ?');
+        countQueryParams.push(`%${title}%`);
+    }
+
+    if (countWhereClauses.length > 0) {
+        countQuery += ` WHERE ${countWhereClauses.join(' AND ')}`;
+    }
+
+    const [totalRows] = await pool.execute(countQuery, countQueryParams);
+    const total = totalRows[0].total;
+
+    res.status(200).json({
+        success: true,
+        count: tickets.length,
+        total: total, // Asegúrate de enviar el total
+        data: tickets,
+    });
 });
 
-
-// @desc    Obtener ticket por ID
+// @desc    Get single ticket by ID
 // @route   GET /api/tickets/:id
-// @access  Private
+// @access  Admin, Agent, Client (if creator or assigned)
 const getTicketById = asyncHandler(async (req, res) => {
     const { id } = req.params;
+    const authenticatedUserId = req.user.id;
+    const authenticatedUserRole = req.user.role;
 
-    console.log('[DEBUG getTicketById] Ejecutando consulta de ticket principal...');
-    const [tickets] = await pool.query(`
+    let query = `
         SELECT
-            t.id,
-            t.title,
-            t.description,
-            t.status,
-            t.priority,
-            t.department_id,
-            d.name AS department_name,
-            t.user_id,
+            t.*,
             u.username AS user_username,
-            u.email AS user_email,
-            t.assigned_to_user_id, -- Usar assigned_to_user_id
+            d.name AS department_name,
             a.username AS agent_username,
-            a.email AS agent_email,
-            t.created_at,
-            t.updated_at,
-            t.closed_at
-        FROM
-            tickets t
-        LEFT JOIN
-            users u ON t.user_id = u.id
-        LEFT JOIN
-            users a ON t.assigned_to_user_id = a.id -- Unir por assigned_to_user_id
-        LEFT JOIN
-            departments d ON t.department_id = d.id
+            tf.id AS feedback_id, tf.rating AS feedback_rating, tf.comment AS feedback_comment, tf.created_at AS feedback_created_at
+        FROM tickets t
+        LEFT JOIN users u ON t.user_id = u.id
+        LEFT JOIN departments d ON t.department_id = d.id
+        LEFT JOIN users a ON t.assigned_to_user_id = a.id
+        LEFT JOIN ticket_feedback tf ON t.id = tf.ticket_id -- <-- ¡CLAVE! JOIN para obtener el feedback
         WHERE t.id = ?
-    `, [id]);
-    console.log('[DEBUG getTicketById] Consulta de ticket principal completada.');
+    `;
+    const queryParams = [id];
 
-    const ticket = tickets[0];
+    // Authorization check in controller:
+    // Client can only see their own ticket
+    // Agent can see tickets assigned to them or in their department
+    if (authenticatedUserRole === 'client') {
+        query += ` AND t.user_id = ?`;
+        queryParams.push(authenticatedUserId);
+    } else if (authenticatedUserRole === 'agent') {
+        query += ` AND (t.assigned_to_user_id = ? OR t.department_id = ?)`;
+        queryParams.push(authenticatedUserId, req.user.department_id);
+    }
+    // Admin can see any ticket, no extra WHERE clause needed for them
 
-    if (!ticket) {
+    const [ticketRows] = await pool.execute(query, queryParams);
+
+    if (ticketRows.length === 0) {
         res.status(404);
-        throw new Error('Ticket no encontrado');
+        throw new Error('Ticket no encontrado o no autorizado.');
     }
 
-    // Autorización: admin, creador del ticket o agente asignado
-    if (req.user.role !== 'admin' && req.user.id !== ticket.user_id && req.user.id !== ticket.assigned_to_user_id) { // Usar assigned_to_user_id
-        res.status(403);
-        throw new Error('No autorizado para ver este ticket');
+    const ticket = ticketRows[0];
+
+    // Formatear el objeto de ticket para que coincida con la interfaz de frontend
+    const formattedTicket = {
+        id: ticket.id,
+        title: ticket.title,
+        description: ticket.description,
+        status: ticket.status,
+        priority: ticket.priority,
+        department_id: ticket.department_id,
+        department_name: ticket.department_name,
+        user_id: ticket.user_id,
+        user_username: ticket.user_username,
+        assigned_to_user_id: ticket.assigned_to_user_id,
+        agent_username: ticket.agent_username,
+        created_at: ticket.created_at,
+        updated_at: ticket.updated_at,
+        closed_at: ticket.closed_at,
+        feedback: null // Inicializar feedback como null
+    };
+
+    // Si hay datos de feedback (es decir, feedback_id no es null), adjuntarlos
+    if (ticket.feedback_id) {
+        formattedTicket.feedback = {
+            id: ticket.feedback_id,
+            ticket_id: ticket.id,
+            user_id: ticket.user_id, // El user_id del feedback es el cliente que lo envió
+            rating: ticket.feedback_rating,
+            comment: ticket.feedback_comment,
+            created_at: ticket.feedback_created_at
+        };
     }
 
-    console.log('[DEBUG getTicketById] Ejecutando consulta de comentarios...');
-    const [comments] = await pool.query(`
-        SELECT tm.id, tm.ticket_id, tm.user_id, u.username AS user_username, tm.message_text AS message, tm.created_at
-        FROM ticket_messages tm
-        JOIN users u ON tm.user_id = u.id
-        WHERE tm.ticket_id = ?
-        ORDER BY tm.created_at ASC
-    `, [id]);
-    console.log('[DEBUG getTicketById] Consulta de comentarios completada. Comentarios obtenidos:', comments); 
-
-    console.log('[DEBUG getTicketById] Ejecutando consulta de activity_logs...');
-    const [activity_logs] = await pool.query(`
-        SELECT al.id, al.user_id, al.user_username, al.user_role, al.action_type, al.description, al.target_type, al.target_id, al.old_value, al.new_value, al.created_at
-        FROM activity_logs al
-        WHERE al.target_type = 'ticket' AND al.target_id = ?
-        ORDER BY al.created_at DESC
-    `, [id]);
-    console.log('[DEBUG getTicketById] Consulta de activity_logs completada.');
-
-    const parsedActivityLogs = activity_logs.map(log => ({
-        ...log,
-        old_value: log.old_value ? JSON.parse(log.old_value) : null,
-        new_value: log.new_value ? JSON.parse(log.new_value) : null,
-    }));
-
-    console.log('[DEBUG getTicketById] Objeto de ticket final a enviar:', { ...ticket, comments, activity_logs: parsedActivityLogs });
-
-    res.status(200).json({ ...ticket, comments, activity_logs: parsedActivityLogs });
+    res.status(200).json(formattedTicket);
 });
 
-// @desc    Crear un nuevo ticket
+// @desc    Create new ticket
 // @route   POST /api/tickets
-// @access  Private
+// @access  Client
 const createTicket = asyncHandler(async (req, res) => {
-    const { title, description, priority, department_id, user_id } = req.body;
-
-    let userIdToAssign = req.user.id;
-    if (req.user.role === 'admin' && user_id) {
-        userIdToAssign = user_id;
-    }
-
-    if (!title || !description || !priority || !department_id) {
-        res.status(400);
-        throw new Error('Por favor, incluye todos los campos obligatorios: asunto, descripción, prioridad, departamento.');
-    }
-
-    console.log('[DEBUG createTicket] Ejecutando INSERT de nuevo ticket...');
-    const [result] = await pool.query(
-        'INSERT INTO tickets (user_id, title, description, priority, department_id) VALUES (?, ?, ?, ?, ?)',
-        [userIdToAssign, title, description, priority, department_id]
-    );
-    console.log('[DEBUG createTicket] INSERT de nuevo ticket completado.');
-
-    const newTicketId = result.insertId;
-
-    await logActivity(
-        req.user.id,
-        req.user.username,
-        req.user.role,
-        'ticket_created',
-        `creó el ticket #${newTicketId}: '${title}'`,
-        'ticket',
-        newTicketId,
-        null,
-        { title, description, priority, department_id, user_id: userIdToAssign }
-    );
-
-    console.log('[DEBUG createTicket] Ejecutando SELECT de admins para notificación...');
-    const [admins] = await pool.query("SELECT id FROM users WHERE role = 'admin'");
-    console.log('[DEBUG createTicket] SELECT de admins completado.');
-    for (const admin of admins) {
-        await createNotification(admin.id, 'new_ticket', `Nuevo ticket creado: "${title}" (ID: ${newTicketId})`, newTicketId, 'ticket');
-    }
-    console.log('[DEBUG createTicket] Ejecutando SELECT de agentes de departamento para notificación...');
-    const [departmentAgents] = await pool.query("SELECT u.id FROM users u JOIN departments d ON u.department_id = d.id WHERE u.role = 'agent' AND d.id = ?", [department_id]);
-    console.log('[DEBUG createTicket] SELECT de agentes de departamento completado.');
-    for (const agent of departmentAgents) {
-        await createNotification(agent.id, 'new_ticket_department', `Nuevo ticket en tu departamento: "${title}" (ID: ${newTicketId})`, newTicketId, 'ticket');
-    }
-
-    console.log('[DEBUG createTicket] Ejecutando SELECT de nuevo ticket para respuesta...');
-    const [newTickets] = await pool.query(`
-        SELECT
-            t.id,
-            t.title,
-            t.description,
-            t.status,
-            t.priority,
-            t.department_id,
-            d.name AS department_name,
-            t.user_id,
-            u.username AS user_username,
-            u.email AS user_email,
-            t.assigned_to_user_id, -- Usar assigned_to_user_id
-            a.username AS agent_username,
-            a.email AS agent_email,
-            t.created_at,
-            t.updated_at,
-            t.closed_at
-        FROM
-            tickets t
-        LEFT JOIN
-            users u ON t.user_id = u.id
-        LEFT JOIN
-            users a ON t.assigned_to_user_id = a.id -- Unir por assigned_to_user_id
-        LEFT JOIN
-            departments d ON t.department_id = d.id
-        WHERE t.id = ?
-    `, [newTicketId]);
-    console.log('[DEBUG createTicket] SELECT de nuevo ticket para respuesta completado.');
-
-    res.status(201).json(newTickets[0]);
-});
-
-// @desc    Actualizar un ticket
-// @route   PUT /api/tickets/:id
-// @access  Private (Admin o agente asignado)
-const updateTicket = asyncHandler(async (req, res) => {
-    const { id } = req.params;
-    // Usar 'assigned_to_user_id' para que coincida con la DB y el frontend
-    let { title, description, status, priority, department_id, assigned_to_user_id } = req.body; 
-
-    console.log(`[DEBUG updateTicket] Iniciando actualización para ticket ID: ${id}`);
-    console.log(`[DEBUG updateTicket] Datos recibidos en req.body (raw):`, req.body);
-
-    department_id = (department_id === '' || isNaN(parseInt(department_id))) ? null : parseInt(department_id);
-    assigned_to_user_id = (assigned_to_user_id === '' || isNaN(parseInt(assigned_to_user_id))) ? null : parseInt(assigned_to_user_id); 
-
-    console.log(`[DEBUG updateTicket] Datos procesados (department_id: ${department_id}, assigned_to_user_id: ${assigned_to_user_id})`);
-
-
-    console.log('[DEBUG updateTicket] Paso 1: Obteniendo ticket existente...');
-    const [existingTickets] = await pool.query('SELECT user_id, assigned_to_user_id, status, priority, title, description, department_id, closed_at FROM tickets WHERE id = ?', [id]); // Usar assigned_to_user_id
-    const existingTicket = existingTickets[0];
-    console.log('[DEBUG updateTicket] Ticket existente:', existingTicket);
-
-    if (!existingTicket) {
-        res.status(404);
-        throw new Error('Ticket no encontrado');
-    }
-
-    if (req.user.role !== 'admin' && req.user.id !== existingTicket.assigned_to_user_id) { // Usar assigned_to_user_id
-        res.status(403);
-        throw new Error('No autorizado para actualizar este ticket');
-    }
-
-    const updateFields = [];
-    const updateValues = [];
-    const changes = [];
-
-    console.log('[DEBUG updateTicket] Paso 2: Verificando cambios y preparando logs/notificaciones...');
-
-    if (title !== undefined && title !== existingTicket.title) {
-        updateFields.push('title = ?'); updateValues.push(title);
-        await logActivity(req.user.id, req.user.username, req.user.role, 'ticket_subject_changed', `Asunto cambiado de '${existingTicket.title}' a '${title}'`, 'ticket', id, existingTicket.title, title);
-        changes.push(`asunto de '${existingTicket.title}' a '${title}'`);
-        console.log(`[DEBUG updateTicket] Cambio detectado: Asunto de '${existingTicket.title}' a '${title}'`);
-    }
-    if (description !== undefined && description !== existingTicket.description) {
-        updateFields.push('description = ?'); updateValues.push(description);
-        await logActivity(req.user.id, req.user.username, req.user.role, 'ticket_description_changed', `Descripción cambiada`, 'ticket', id, existingTicket.description, description);
-        changes.push(`descripción`);
-        console.log(`[DEBUG updateTicket] Cambio detectado: Descripción`);
-    }
-    if (status !== undefined && status !== existingTicket.status) {
-        updateFields.push('status = ?'); updateValues.push(status);
-        await logActivity(req.user.id, req.user.username, req.user.role, 'ticket_status_changed', `Estado cambiado de '${existingTicket.status}' a '${status}'`, 'ticket', id, existingTicket.status, status);
-        changes.push(`estado de '${existingTicket.status}' a '${status}'`);
-        console.log(`[DEBUG updateTicket] Cambio detectado: Estado de '${existingTicket.status}' a '${status}'`);
-        if (status === 'closed' && existingTicket.closed_at === null) {
-            updateFields.push('closed_at = CURRENT_TIMESTAMP');
-            changes.push(`fecha de cierre`);
-        } else if (status !== 'closed' && existingTicket.closed_at !== null) {
-            updateFields.push('closed_at = NULL');
-            changes.push(`fecha de cierre (reabierto)`);
-        }
-
-        if (req.user.id !== existingTicket.user_id) {
-            await createNotification(existingTicket.user_id, 'status_changed', `El estado de tu ticket #${id} ha cambiado a '${status}'`, id, 'ticket');
-        }
-        if (existingTicket.assigned_to_user_id && req.user.id !== existingTicket.assigned_to_user_id) { // Usar assigned_to_user_id
-            await createNotification(existingTicket.assigned_to_user_id, 'status_changed', `El estado del ticket #${id} ha cambiado a '${status}'`, id, 'ticket'); // Usar assigned_to_user_id
-        }
-    }
-    if (priority !== undefined && priority !== existingTicket.priority) {
-        updateFields.push('priority = ?'); updateValues.push(priority);
-        await logActivity(req.user.id, req.user.username, req.user.role, 'ticket_priority_changed', `Prioridad cambiada de '${existingTicket.priority}' a '${priority}'`, 'ticket', id, existingTicket.priority, priority);
-        changes.push(`prioridad de '${existingTicket.priority}' a '${priority}'`);
-        console.log(`[DEBUG updateTicket] Cambio detectado: Prioridad de '${existingTicket.priority}' a '${priority}'`);
-        if (req.user.id !== existingTicket.user_id) {
-            await createNotification(existingTicket.user_id, 'priority_changed', `La prioridad de tu ticket #${id} ha cambiado a '${priority}'`, id, 'ticket');
-        }
-    }
-
-    console.log('[DEBUG updateTicket] Verificando cambio de departamento...');
-    if (department_id !== undefined && department_id !== existingTicket.department_id) {
-        updateFields.push('department_id = ?'); updateValues.push(department_id);
-        
-        const [oldDeptRows] = await pool.query('SELECT name FROM departments WHERE id = ?', [existingTicket.department_id]);
-        const oldDeptName = oldDeptRows && oldDeptRows.length > 0 ? oldDeptRows[0].name : 'Sin Departamento';
-        console.log('[DEBUG updateTicket] oldDeptRows:', oldDeptRows, 'oldDeptName:', oldDeptName);
-
-        const [newDeptRows] = department_id ? await pool.query('SELECT name FROM departments WHERE id = ?', [department_id]) : [[]];
-        const newDeptName = newDeptRows && newDeptRows.length > 0 ? newDeptRows[0].name : 'Sin Departamento';
-        console.log('[DEBUG updateTicket] newDeptRows:', newDeptRows, 'newDeptName:', newDeptName);
-
-        await logActivity(req.user.id, req.user.username, req.user.role, 'ticket_department_changed', `Departamento cambiado de '${oldDeptName}' a '${newDeptName}'`, 'ticket', id, oldDeptName, newDeptName);
-        changes.push(`departamento de '${oldDeptName}' a '${newDeptName}'`);
-        console.log(`[DEBUG updateTicket] Cambio detectado: Departamento de '${oldDeptName}' a '${newDeptName}'`);
-    }
-
-    console.log('[DEBUG updateTicket] Verificando cambio de agente...');
-    if (assigned_to_user_id !== undefined && assigned_to_user_id !== existingTicket.assigned_to_user_id) { 
-        updateFields.push('assigned_to_user_id = ?'); updateValues.push(assigned_to_user_id); 
-
-        const [oldAgentRows] = existingTicket.assigned_to_user_id ? await pool.query('SELECT username FROM users WHERE id = ?', [existingTicket.assigned_to_user_id]) : [[]]; 
-        const oldAgentName = oldAgentRows && oldAgentRows.length > 0 ? oldAgentRows[0].username : 'Sin asignar';
-        console.log('[DEBUG updateTicket] oldAgentRows:', oldAgentRows, 'oldAgentName:', oldAgentName);
-
-        const [newAgentRows] = assigned_to_user_id ? await pool.query('SELECT username FROM users WHERE id = ?', [assigned_to_user_id]) : [[]]; 
-        const newAgentName = newAgentRows && newAgentRows.length > 0 ? newAgentRows[0].username : 'Sin asignar';
-        console.log('[DEBUG updateTicket] newAgentRows:', newAgentRows, 'newAgentName:', newAgentName);
-
-        await logActivity(req.user.id, req.user.username, req.user.role, 'ticket_agent_changed', `Agente asignado cambiado de '${oldAgentName}' a '${newAgentName}'`, 'ticket', id, oldAgentName, newAgentName);
-        changes.push(`agente asignado de '${oldAgentName}' a '${newAgentName}'`);
-        console.log(`[DEBUG updateTicket] Cambio detectado: Agente de '${oldAgentName}' a '${newAgentName}'`);
-
-        if (assigned_to_user_id) { 
-            await createNotification(assigned_to_user_id, 'ticket_assigned', `Se te ha asignado el ticket #${id}: "${existingTicket.title}"`, id, 'ticket'); 
-        }
-        if (oldAgentName !== 'Sin asignar' && !assigned_to_user_id) { 
-            // Considerar si quieres notificar al agente anterior que se le desasignó
-        }
-    }
-
-    if (updateFields.length === 0) {
-        console.log('[DEBUG updateTicket] No se detectaron cambios. Devolviendo ticket existente.');
-        return res.status(200).json(existingTicket);
-    }
-
-    const query = `UPDATE tickets SET ${updateFields.join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`;
-    updateValues.push(id);
-
-    console.log('[DEBUG updateTicket] Paso 3: Ejecutando UPDATE en la base de datos...');
-    console.log('[DEBUG updateTicket] Query:', query);
-    console.log('[DEBUG updateTicket] Values:', updateValues);
-    await pool.query(query, updateValues);
-    console.log('[DEBUG updateTicket] UPDATE completado.');
-
-    const [updatedTickets] = await pool.query(`
-        SELECT
-            t.id,
-            t.title,
-            t.description,
-            t.status,
-            t.priority,
-            t.department_id,
-            d.name AS department_name,
-            t.user_id,
-            u.username AS user_username,
-            u.email AS user_email,
-            t.assigned_to_user_id, 
-            a.username AS agent_username,
-            a.email AS agent_email,
-            t.created_at,
-            t.updated_at,
-            t.closed_at
-        FROM
-            tickets t
-        LEFT JOIN
-            users u ON t.user_id = u.id
-        LEFT JOIN
-            users a ON t.assigned_to_user_id = a.id 
-        LEFT JOIN
-            departments d ON t.department_id = d.id
-        WHERE t.id = ?
-    `, [id]);
-    console.log('[DEBUG updateTicket] Ticket actualizado obtenido para respuesta:', updatedTickets[0]);
-
-    res.status(200).json(updatedTickets[0]);
-});
-
-// @desc    Eliminar un ticket
-// @route   DELETE /api/tickets/:id
-// @access  Private (Admin only)
-const deleteTicket = asyncHandler(async (req, res) => {
-    const { id } = req.params;
-
-    console.log(`[DEBUG deleteTicket] Iniciando eliminación para ticket ID: ${id}`);
-
-    const [ticketRows] = await pool.query('SELECT * FROM tickets WHERE id = ?', [id]);
-    const ticketToDelete = ticketRows[0];
-
-    if (!ticketToDelete) {
-        res.status(404);
-        throw new Error('Ticket no encontrado');
-    }
-
-    if (req.user.role !== 'admin' && req.user.id !== ticketToDelete.user_id) {
-        res.status(403);
-        throw new Error('No autorizado para eliminar este ticket');
-    }
-
-    await pool.query('DELETE FROM ticket_messages WHERE ticket_id = ?', [id]);
-    await pool.query('DELETE FROM activity_logs WHERE target_type = ? AND target_id = ?', ['ticket', id]);
-    await pool.query('DELETE FROM notifications WHERE related_type = ? AND related_id = ?', ['ticket', id]);
-
-    const [result] = await pool.query('DELETE FROM tickets WHERE id = ?', [id]);
-
-    if (result.affectedRows === 0) {
-        res.status(404);
-        throw new Error('Ticket no encontrado');
-    }
-
-    await logActivity(
-        req.user.id,
-        req.user.username,
-        req.user.role,
-        'ticket_deleted',
-        `eliminó el ticket #${id}: '${ticketToDelete.title}'`,
-        'ticket',
-        parseInt(id),
-        ticketToDelete,
-        null
-    );
-
-    res.status(200).json({ message: 'Ticket eliminado exitosamente.' });
-});
-
-// NUEVO: Función para añadir un comentario a un ticket
-// @desc    Añadir un comentario a un ticket
-// @route   POST /api/tickets/:id/comments
-// @access  Private
-const addCommentToTicket = asyncHandler(async (req, res) => {
-    const { id: ticketId } = req.params;
-    const { message_text } = req.body;
-    const userId = req.user.id;
+    const { title, description, priority, department_id } = req.body;
+    const userId = req.user.id; // ID del usuario autenticado (cliente)
     const username = req.user.username;
     const userRole = req.user.role;
 
-    if (!message_text) {
+    if (!title || !description || !priority || !department_id) {
         res.status(400);
-        throw new Error('El mensaje del comentario no puede estar vacío.');
+        throw new Error('Por favor, complete todos los campos requeridos: título, descripción, prioridad, departamento.');
     }
 
-    const [ticketRows] = await pool.query('SELECT user_id, assigned_to_user_id, title FROM tickets WHERE id = ?', [ticketId]); // Usar assigned_to_user_id
-    const ticket = ticketRows[0];
-
-    if (!ticket) {
-        res.status(404);
-        throw new Error('Ticket no encontrado.');
-    }
-
-    if (userRole === 'client' && userId !== ticket.user_id) {
-        res.status(403);
-        throw new Error('No tienes permiso para comentar en este ticket.');
-    }
-    if (userRole === 'agent' && userId !== ticket.assigned_to_user_id && userRole !== 'admin') { // Usar assigned_to_user_id
-        res.status(403);
-        throw new Error('No tienes permiso para comentar en este ticket.');
-    }
-
-    console.log(`[DEBUG addCommentToTicket] Añadiendo comentario a ticket ID: ${ticketId} por usuario ID: ${userId}`);
-
-    const [result] = await pool.query(
-        'INSERT INTO ticket_messages (ticket_id, user_id, message_text) VALUES (?, ?, ?)',
-        [ticketId, userId, message_text]
+    const [result] = await pool.execute(
+        'INSERT INTO tickets (title, description, status, priority, user_id, department_id) VALUES (?, ?, ?, ?, ?, ?)',
+        [title, description, 'open', priority, userId, department_id]
     );
 
-    const newCommentId = result.insertId;
+    const newTicketId = result.insertId;
 
+    // Log activity
+    console.log(`[TicketController] Llamando logActivity para creación de ticket por usuario ${userId}`);
     await logActivity(
         userId,
         username,
         userRole,
-        'comment_added',
-        `añadió un comentario al ticket #${ticketId}: '${message_text.substring(0, 50)}...'`,
-        'ticket',
-        ticketId,
-        null,
-        { message_text }
+        'ticket_created',    // action_type (más específico)
+        `Ticket "${title}" (ID: ${newTicketId}) creado por ${username}.`, // description
+        'ticket',            // target_type
+        newTicketId,         // target_id
+        null,                // old_value
+        { title, description, priority, department_id, status: 'open', user_id: userId } // new_value
     );
 
-    if (userId !== ticket.user_id) {
-        await createNotification(
-            ticket.user_id,
-            'new_comment',
-            `Nuevo comentario en tu ticket #${ticketId}: "${message_text.substring(0, 50)}..."`,
-            ticketId,
-            'ticket'
-        );
+    // Emit socket event (assuming 'io' is available via req.app.get('io'))
+    if (req.app.get('io')) {
+        req.app.get('io').to('admin').emit('newTicket', {
+            message: `Nuevo ticket #${newTicketId} creado por ${req.user.username}: "${title}"`,
+            ticketId: newTicketId,
+        });
+        req.app.get('io').to('agent').emit('newTicket', { // Notificar a todos los agentes
+            message: `Nuevo ticket #${newTicketId} creado por ${req.user.username}: "${title}"`,
+            ticketId: newTicketId,
+        });
     }
 
-    if (ticket.assigned_to_user_id && userId !== ticket.assigned_to_user_id) { // Usar assigned_to_user_id
-        await createNotification(
-            ticket.assigned_to_user_id, // Usar assigned_to_user_id
-            'new_comment',
-            `Nuevo comentario en el ticket #${ticketId} asignado a ti: "${message_text.substring(0, 50)}..."`,
-            ticketId,
-            'ticket'
-        );
+    res.status(201).json({
+        success: true,
+        message: 'Ticket creado exitosamente',
+        ticketId: newTicketId,
+    });
+});
+
+// @desc    Update ticket
+// @route   PUT /api/tickets/:id
+// @access  Admin, Agent (assigned or in department)
+const updateTicket = asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const { title, description, status, priority, department_id, assigned_to_user_id } = req.body;
+    const userId = req.user.id;
+    const username = req.user.username;
+    const userRole = req.user.role;
+
+    const [existingTicketRows] = await pool.execute('SELECT * FROM tickets WHERE id = ?', [id]);
+    if (existingTicketRows.length === 0) {
+        res.status(404);
+        throw new Error('Ticket no encontrado');
     }
-    
-    if (userRole !== 'admin' && userId !== ticket.user_id && userId !== ticket.assigned_to_user_id) { // Usar assigned_to_user_id
-        const [admins] = await pool.query("SELECT id FROM users WHERE role = 'admin'");
-        for (const admin of admins) {
-            await createNotification(
-                admin.id,
-                'new_comment_admin',
-                `Nuevo comentario en ticket #${ticketId} por ${username}: "${message_text.substring(0, 50)}..."`,
-                ticketId,
-                'ticket'
-            );
+    const oldTicketData = existingTicketRows[0];
+
+    // Authorization check: only admin/agent can update, and agent must be assigned or in department
+    if (userRole === 'client') { // Clients cannot update tickets directly via this endpoint
+        res.status(403);
+        throw new Error('No autorizado para actualizar tickets.');
+    }
+    if (userRole === 'agent' && oldTicketData.assigned_to_user_id !== userId && oldTicketData.department_id !== req.user.department_id) {
+        res.status(403);
+        throw new Error('No autorizado para actualizar este ticket.');
+    }
+
+    const updateFields = {};
+    const updateParams = [];
+
+    if (title !== undefined) { updateFields.title = title; updateParams.push(title); }
+    if (description !== undefined) { updateFields.description = description; updateParams.push(description); }
+    if (status !== undefined) { updateFields.status = status; updateParams.push(status); }
+    if (priority !== undefined) { updateFields.priority = priority; updateParams.push(priority); }
+    if (department_id !== undefined) { updateFields.department_id = department_id; updateParams.push(department_id); }
+    if (assigned_to_user_id !== undefined) { updateFields.assigned_to_user_id = assigned_to_user_id; updateParams.push(assigned_to_user_id); }
+
+    // Set closed_at if status becomes 'resolved' or 'closed' and wasn't before
+    if ((status === 'resolved' || status === 'closed') && !oldTicketData.closed_at) {
+        updateFields.closed_at = new Date();
+        updateParams.push(updateFields.closed_at);
+    } else if (status !== 'resolved' && status !== 'closed' && oldTicketData.closed_at) {
+        // If status changes from resolved/closed to something else, clear closed_at
+        updateFields.closed_at = null;
+        updateParams.push(updateFields.closed_at);
+    }
+
+
+    if (Object.keys(updateFields).length === 0) {
+        res.status(400);
+        throw new Error('No se proporcionaron campos para actualizar.');
+    }
+
+    const setClauses = Object.keys(updateFields).map(key => `${key} = ?`).join(', ');
+    updateParams.push(id); // Add ticket ID for WHERE clause
+
+    await pool.execute(`UPDATE tickets SET ${setClauses} WHERE id = ?`, updateParams);
+
+    // Fetch updated ticket data for logging
+    const [updatedTicketRows] = await pool.execute('SELECT * FROM tickets WHERE id = ?', [id]);
+    const newTicketData = updatedTicketRows[0];
+
+    // Log activity
+    console.log(`[TicketController] Llamando logActivity para actualización de ticket ${id} por usuario ${userId}`);
+    await logActivity(
+        userId,
+        username,
+        userRole,
+        'ticket_updated',    // action_type (más específico)
+        `Ticket "${oldTicketData.title}" (ID: ${id}) actualizado por ${username}.`, // description
+        'ticket',            // target_type
+        parseInt(id),        // target_id
+        oldTicketData,       // old_value
+        newTicketData        // new_value
+    );
+
+    // Emit socket event
+    if (req.app.get('io')) {
+        req.app.get('io').to(`ticket-${id}`).emit('ticketUpdated', {
+            message: `Ticket #${id} ha sido actualizado por ${req.user.username}.`,
+            ticketId: parseInt(id),
+        });
+        req.app.get('io').to('admin').emit('ticketUpdated', {
+            message: `Ticket #${id} ha sido actualizado por ${req.user.username}.`,
+            ticketId: parseInt(id),
+        });
+        // Notificar al creador del ticket si es diferente del que actualizó
+        if (newTicketData.user_id && newTicketData.user_id !== userId) {
+            req.app.get('io').to(`user-${newTicketData.user_id}`).emit('ticketUpdated', {
+                message: `Tu ticket #${id} ha sido actualizado.`,
+                ticketId: parseInt(id),
+            });
+        }
+        // Notificar al nuevo agente asignado si hubo cambio
+        if (newTicketData.assigned_to_user_id && newTicketData.assigned_to_user_id !== oldTicketData.assigned_to_user_id) {
+            req.app.get('io').to(`user-${newTicketData.assigned_to_user_id}`).emit('ticketAssigned', {
+                message: `Se te ha asignado el ticket #${id}.`,
+                ticketId: parseInt(id),
+            });
         }
     }
 
-    const [newCommentRows] = await pool.query(`
-        SELECT tm.id, tm.ticket_id, tm.user_id, u.username AS user_username, tm.message_text AS message, tm.created_at
-        FROM ticket_messages tm
-        JOIN users u ON tm.user_id = u.id
-        WHERE tm.id = ?
-    `, [newCommentId]);
+    res.status(200).json({
+        success: true,
+        message: 'Ticket actualizado exitosamente.',
+        updatedFields: updateFields,
+    });
+});
 
-    res.status(201).json(newCommentRows[0]);
+// @desc    Delete ticket
+// @route   DELETE /api/tickets/:id
+// @access  Admin
+const deleteTicket = asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const userId = req.user.id;
+    const username = req.user.username;
+    const userRole = req.user.role;
+
+    const [existingTicketRows] = await pool.execute('SELECT * FROM tickets WHERE id = ?', [id]);
+    if (existingTicketRows.length === 0) {
+        res.status(404);
+        throw new Error('Ticket no encontrado');
+    }
+    const deletedTicketData = existingTicketRows[0];
+
+    await pool.execute('DELETE FROM tickets WHERE id = ?', [id]);
+
+    // Log activity
+    console.log(`[TicketController] Llamando logActivity para eliminación de ticket ${id} por usuario ${userId}`);
+    await logActivity(
+        userId,
+        username,
+        userRole,
+        'ticket_deleted',    // action_type (más específico)
+        `Ticket "${deletedTicketData.title}" (ID: ${id}) eliminado por ${username}.`, // description
+        'ticket',            // target_type
+        parseInt(id),        // target_id
+        deletedTicketData,   // old_value
+        null                 // new_value
+    );
+
+    // Emit socket event
+    if (req.app.get('io')) {
+        req.app.get('io').to('admin').emit('ticketDeleted', {
+            message: `Ticket #${id} ha sido eliminado por ${req.user.username}.`,
+            ticketId: parseInt(id),
+        });
+        // Notificar al creador del ticket si no es el admin que lo eliminó
+        if (deletedTicketData.user_id && deletedTicketData.user_id !== userId) {
+            req.app.get('io').to(`user-${deletedTicketData.user_id}`).emit('ticketDeleted', {
+                message: `Tu ticket #${id} ha sido eliminado.`,
+                ticketId: parseInt(id),
+            });
+        }
+    }
+
+    res.status(200).json({
+        success: true,
+        message: 'Ticket eliminado exitosamente.',
+    });
+});
+
+// @desc    Add comment to ticket
+// @route   POST /api/tickets/:id/comments
+// @access  Admin, Agent, Client (if creator or assigned)
+const addCommentToTicket = asyncHandler(async (req, res) => {
+    const { id: ticketId } = req.params;
+    const { comment_text } = req.body;
+    const userId = req.user.id;
+    const username = req.user.username; // Obtener el username del usuario autenticado
+    const userRole = req.user.role;
+
+    if (!comment_text) {
+        res.status(400);
+        throw new Error('El texto del comentario no puede estar vacío.');
+    }
+
+    // Verify ticket existence and user authorization
+    const [ticketRows] = await pool.execute('SELECT user_id, assigned_to_user_id, department_id, title FROM tickets WHERE id = ?', [ticketId]);
+    if (ticketRows.length === 0) {
+        res.status(404);
+        throw new Error('Ticket no encontrado.');
+    }
+    const ticket = ticketRows[0];
+
+    // Authorization check (similar to getTicketById or updateTicket)
+    if (userRole === 'client' && ticket.user_id !== userId) {
+        res.status(403);
+        throw new Error('No autorizado para añadir comentarios a este ticket.');
+    }
+    if (userRole === 'agent' && ticket.assigned_to_user_id !== userId && ticket.department_id !== req.user.department_id) {
+        res.status(403);
+        throw new Error('No autorizado para añadir comentarios a este ticket.');
+    }
+
+    const [result] = await pool.execute(
+        'INSERT INTO ticket_comments (ticket_id, user_id, comment_text) VALUES (?, ?, ?)',
+        [ticketId, userId, comment_text]
+    );
+
+    const newCommentId = result.insertId;
+
+    // Log activity
+    console.log(`[TicketController] Llamando logActivity para añadir comentario a ticket ${ticketId} por usuario ${userId}`);
+    await logActivity(
+        userId,
+        username,
+        userRole,
+        'comment_added',     // action_type (más específico)
+        `Comentario añadido al ticket "${ticket.title}" (ID: ${ticketId}) por ${username}.`, // description
+        'comment',           // target_type
+        newCommentId,        // target_id
+        null,                // old_value
+        { ticket_id: parseInt(ticketId), comment_text: comment_text.substring(0, 50) + '...' } // new_value
+    );
+
+    // Emit socket event
+    if (req.app.get('io')) {
+        // Notificar a la sala del ticket (todos los que lo están viendo)
+        req.app.get('io').to(`ticket-${ticketId}`).emit('newComment', {
+            message: `Nuevo comentario en ticket #${ticketId} por ${username}.`,
+            ticketId: parseInt(ticketId),
+            commentId: newCommentId,
+        });
+
+        // Notificar a otros roles relevantes si es necesario
+        if (userRole === 'client') {
+            // Si el cliente comenta, notificar al agente asignado y a los admins
+            if (ticket.assigned_to_user_id) {
+                req.app.get('io').to(`user-${ticket.assigned_to_user_id}`).emit('newComment', {
+                    message: `Nuevo comentario en tu ticket asignado #${ticketId}.`,
+                    ticketId: parseInt(ticketId),
+                });
+            }
+            req.app.get('io').to('admin').emit('newComment', {
+                message: `Nuevo comentario en ticket #${ticketId}.`,
+                ticketId: parseInt(ticketId),
+            });
+        } else if (userRole === 'agent' || userRole === 'admin') {
+            // Si un agente/admin comenta, notificar al creador del ticket (cliente)
+            req.app.get('io').to(`user-${ticket.user_id}`).emit('newComment', {
+                message: `Nuevo comentario en tu ticket #${ticketId}.`,
+                ticketId: parseInt(ticketId),
+            });
+        }
+    }
+
+    res.status(201).json({
+        success: true,
+        message: 'Comentario añadido exitosamente.',
+        commentId: newCommentId,
+    });
+});
+
+// @desc    Get comments for a ticket
+// @route   GET /api/tickets/:id/comments
+// @access  Admin, Agent, Client (if creator or assigned)
+const getTicketComments = asyncHandler(async (req, res) => {
+    const { id: ticketId } = req.params;
+    const authenticatedUserId = req.user.id;
+    const authenticatedUserRole = req.user.role;
+
+    // Verify ticket existence and user authorization (similar to getTicketById)
+    const [ticketRows] = await pool.execute('SELECT user_id, assigned_to_user_id, department_id FROM tickets WHERE id = ?', [ticketId]);
+    if (ticketRows.length === 0) {
+        res.status(404);
+        throw new Error('Ticket no encontrado.');
+    }
+    const ticket = ticketRows[0];
+
+    // Authorization check
+    if (authenticatedUserRole === 'client' && ticket.user_id !== authenticatedUserId) {
+        res.status(403);
+        throw new Error('No autorizado para ver los comentarios de este ticket.');
+    }
+    if (authenticatedUserRole === 'agent' && ticket.assigned_to_user_id !== authenticatedUserId && ticket.department_id !== req.user.department_id) {
+        res.status(403);
+        throw new Error('No autorizado para ver los comentarios de este ticket.');
+    }
+
+    const [comments] = await pool.execute(
+        `SELECT tc.*, u.username AS user_username
+         FROM ticket_comments tc
+         JOIN users u ON tc.user_id = u.id
+         WHERE tc.ticket_id = ?
+         ORDER BY tc.created_at ASC`,
+        [ticketId]
+    );
+
+    res.status(200).json(comments);
 });
 
 
+// Export all functions
 module.exports = {
     getAllTickets,
     getTicketById,
     createTicket,
     updateTicket,
     deleteTicket,
-    addCommentToTicket
+    addCommentToTicket,
+    getTicketComments,
 };

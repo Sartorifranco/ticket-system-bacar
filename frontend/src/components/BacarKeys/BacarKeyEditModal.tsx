@@ -1,179 +1,167 @@
-// frontend/src/components/BacarKeys/BacarKeyEditModal.tsx
-import React, { useState, useEffect, useCallback } from 'react';
-import ReactDOM from 'react-dom';
+// src/components/BacarKeys/BacarKeyEditModal.tsx
+import React, { useState, useEffect } from 'react';
 import api from '../../config/axiosConfig';
 import { useAuth } from '../../context/AuthContext';
-import { useNotification } from '../../context/NotificationContext'; // <-- AÑADIDO: Importar useNotification
-import { BacarKey } from '../../types'; // Importar la interfaz BacarKey
-import { isAxiosErrorTypeGuard, ApiResponseError } from '../../utils/typeGuards';
+import { useNotification } from '../../context/NotificationContext';
+import { BacarKey, BacarKeyFormData, ApiResponseError } from '../../types';
+import { isAxiosErrorTypeGuard } from '../../utils/typeGuards';
 
 interface BacarKeyEditModalProps {
     isOpen: boolean;
     onClose: () => void;
-    keyToEdit: BacarKey | null;
-    onKeyUpdated: () => void;
-    token: string | null;
+    initialData: BacarKey | null; // Para edición
+    onSaveSuccess: () => void; // Callback para notificar a la lista que recargue
 }
 
-const BacarKeyEditModal: React.FC<BacarKeyEditModalProps> = ({
-    isOpen,
-    onClose,
-    keyToEdit,
-    onKeyUpdated,
-    token,
-}) => {
-    // MODIFICADO: addNotification ahora se obtiene de useNotification
-    const { addNotification } = useNotification(); 
+const BacarKeyEditModal: React.FC<BacarKeyEditModalProps> = ({ isOpen, onClose, initialData, onSaveSuccess }) => {
+    const { token } = useAuth();
+    const { addNotification } = useNotification();
     const [deviceUser, setDeviceUser] = useState('');
     const [username, setUsername] = useState('');
     const [password, setPassword] = useState('');
     const [notes, setNotes] = useState('');
     const [loading, setLoading] = useState(false);
-    const [error, setError] = useState<string | null>(null);
 
     useEffect(() => {
-        if (keyToEdit) {
-            setDeviceUser(keyToEdit.device_user);
-            setUsername(keyToEdit.username);
-            setPassword(keyToEdit.password); 
-            setNotes(keyToEdit.notes || '');
-            setError(null);
+        if (initialData) {
+            setDeviceUser(initialData.device_user);
+            setUsername(initialData.username);
+            setPassword(initialData.password); // Asumiendo que la contraseña se devuelve para edición (cuidado con seguridad)
+            setNotes(initialData.notes || '');
         } else {
             setDeviceUser('');
             setUsername('');
             setPassword('');
             setNotes('');
-            setError(null);
         }
-    }, [keyToEdit]);
+    }, [initialData, isOpen]);
 
-    const handleSubmit = useCallback(async (e: React.FormEvent) => {
+    const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         setLoading(true);
-        setError(null);
 
         if (!deviceUser.trim() || !username.trim() || !password.trim()) {
-            setError('Por favor, ingresa el usuario del dispositivo, el nombre de usuario y la contraseña.');
-            addNotification('Por favor, completa todos los campos obligatorios.', 'error');
+            addNotification('Usuario de dispositivo, usuario y contraseña son obligatorios.', 'warning');
             setLoading(false);
             return;
         }
 
         try {
-            if (!token) {
-                throw new Error('No autorizado. Token no disponible.');
-            }
-
-            const keyData = {
+            const dataToSave: BacarKeyFormData = {
                 device_user: deviceUser,
-                username,
-                password,
-                notes: notes || null,
+                username: username,
+                password: password,
+                notes: notes || null, // Asegura que notes sea null si está vacío
             };
 
-            if (keyToEdit) {
-                await api.put(`/api/bacar-keys/${keyToEdit.id}`, keyData, {
+            if (initialData) {
+                // Actualizar clave existente
+                await api.put(`/api/bacar-keys/${initialData.id}`, dataToSave, {
                     headers: { Authorization: `Bearer ${token}` },
                 });
                 addNotification('Clave Bacar actualizada exitosamente.', 'success');
             } else {
-                await api.post('/api/bacar-keys', keyData, {
+                // Crear nueva clave
+                await api.post('/api/bacar-keys', dataToSave, {
                     headers: { Authorization: `Bearer ${token}` },
                 });
                 addNotification('Clave Bacar creada exitosamente.', 'success');
             }
-            onKeyUpdated();
+            onSaveSuccess();
             onClose();
         } catch (err: unknown) {
+            console.error('Error saving Bacar Key:', err);
             if (isAxiosErrorTypeGuard(err)) {
                 const apiError = err.response?.data as ApiResponseError;
-                setError(apiError?.message || 'Error al guardar la clave Bacar.');
-                addNotification(`Error al guardar clave: ${apiError?.message || 'Error desconocido'}`, 'error');
+                addNotification(`Error al guardar clave Bacar: ${apiError?.message || 'Error desconocido'}`, 'error');
             } else {
-                setError('Ocurrió un error inesperado al guardar la clave Bacar.');
+                addNotification('Ocurrió un error inesperado al guardar la clave Bacar.', 'error');
             }
-            console.error('Error saving Bacar Key:', err);
         } finally {
             setLoading(false);
         }
-    }, [token, keyToEdit, deviceUser, username, password, notes, addNotification, onKeyUpdated, onClose]);
+    };
 
     if (!isOpen) return null;
 
-    const portalElement = document.getElementById('modal-root');
-    if (!portalElement) {
-        console.error("Error: 'modal-root' no encontrado para BacarKeyEditModal. El portal no se puede crear.");
-        return null;
-    }
-
-    return ReactDOM.createPortal(
-        <div className="modal-overlay">
-            <div className="modal-content admin-modal-size">
-                <h2 className="modal-title">{keyToEdit ? 'Editar Clave Bacar' : 'Crear Nueva Clave Bacar'}</h2>
-                <button className="modal-close-button" onClick={onClose}>&times;</button>
-
-                {error && <p className="error-message-modal">{error}</p>}
-
-                <form onSubmit={handleSubmit} className="modal-form">
-                    <div className="form-group">
-                        <label htmlFor="deviceUser">Usuario del Dispositivo:</label>
+    return (
+        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 flex justify-center items-center z-50 overflow-y-auto p-4">
+            <div className="bg-white p-6 rounded-lg shadow-xl w-full max-w-md my-8">
+                <h2 className="text-2xl font-bold mb-4 text-gray-800 border-b pb-2">
+                    {initialData ? 'Editar Clave Bacar' : 'Añadir Nueva Clave Bacar'}
+                </h2>
+                <form onSubmit={handleSubmit}>
+                    <div className="mb-4">
+                        <label htmlFor="deviceUser" className="block text-gray-700 text-sm font-bold mb-2">Usuario Dispositivo:</label>
                         <input
                             type="text"
                             id="deviceUser"
+                            name="deviceUser"
+                            className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
                             value={deviceUser}
                             onChange={(e) => setDeviceUser(e.target.value)}
-                            className="form-input"
                             required
                             disabled={loading}
                         />
                     </div>
-                    <div className="form-group">
-                        <label htmlFor="username">Nombre de Usuario (Login):</label>
+                    <div className="mb-4">
+                        <label htmlFor="username" className="block text-gray-700 text-sm font-bold mb-2">Usuario:</label>
                         <input
                             type="text"
                             id="username"
+                            name="username"
+                            className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
                             value={username}
                             onChange={(e) => setUsername(e.target.value)}
-                            className="form-input"
                             required
                             disabled={loading}
                         />
                     </div>
-                    <div className="form-group">
-                        <label htmlFor="password">Contraseña:</label>
+                    <div className="mb-4">
+                        <label htmlFor="password" className="block text-gray-700 text-sm font-bold mb-2">Contraseña:</label>
                         <input
-                            type="password"
+                            type="text" // Puedes cambiar a "password" si no quieres que se vea el valor actual
                             id="password"
+                            name="password"
+                            className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
                             value={password}
                             onChange={(e) => setPassword(e.target.value)}
-                            className="form-input"
                             required
                             disabled={loading}
                         />
                     </div>
-                    <div className="form-group">
-                        <label htmlFor="notes">Notas (Opcional):</label>
+                    <div className="mb-4">
+                        <label htmlFor="notes" className="block text-gray-700 text-sm font-bold mb-2">Notas (Opcional):</label>
                         <textarea
                             id="notes"
+                            name="notes"
+                            className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
                             value={notes}
                             onChange={(e) => setNotes(e.target.value)}
-                            className="form-input"
                             rows={3}
                             disabled={loading}
                         ></textarea>
                     </div>
-                    <div className="modal-actions">
-                        <button type="submit" className="button primary-button" disabled={loading}>
-                            {loading ? 'Guardando...' : 'Guardar Clave'}
-                        </button>
-                        <button type="button" className="button secondary-button" onClick={onClose} disabled={loading}>
+                    <div className="flex justify-end gap-3">
+                        <button
+                            type="button"
+                            onClick={onClose}
+                            className="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-4 rounded-lg shadow-md transition duration-300 ease-in-out focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-opacity-75"
+                            disabled={loading}
+                        >
                             Cancelar
+                        </button>
+                        <button
+                            type="submit"
+                            className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg shadow-md transition duration-300 ease-in-out transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-75"
+                            disabled={loading}
+                        >
+                            {initialData ? 'Actualizar' : 'Crear'}
                         </button>
                     </div>
                 </form>
             </div>
-        </div>,
-        portalElement
+        </div>
     );
 };
 

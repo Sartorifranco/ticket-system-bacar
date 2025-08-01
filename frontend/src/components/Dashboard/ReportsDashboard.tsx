@@ -1,297 +1,262 @@
-// frontend/src/components/Dashboard/ReportsDashboard.tsx
+// src/components/Dashboard/ReportsDashboard.tsx
 import React, { useState, useEffect, useCallback } from 'react';
-import {
-    PieChart, Pie, Cell, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
-    LineChart, Line
-} from 'recharts';
 import api from '../../config/axiosConfig';
 import { useAuth } from '../../context/AuthContext';
 import { useNotification } from '../../context/NotificationContext';
-import { ReportMetrics, TicketStatus, TicketPriority } from '../../types';
-import { isAxiosErrorTypeGuard, ApiResponseError } from '../../utils/typeGuards';
-import { ticketStatusTranslations, ticketPriorityTranslations, translateTerm } from '../../utils/traslations';
+// CORREGIDO: Importar TicketData en lugar de Ticket
+import { ReportMetrics, TicketData, ActivityLog, ApiResponseError } from '../../types';
+import { isAxiosErrorTypeGuard } from '../../utils/typeGuards';
+import { Bar, Pie } from 'react-chartjs-2';
+import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend, ArcElement } from 'chart.js';
 
-// Componente de Tooltip personalizado para Recharts
-const CustomTooltip = ({ active, payload, label }: any) => {
-    if (active && payload && payload.length) {
-        let translatedName = payload[0].name;
-        // Intentar traducir como estado de ticket
-        if (ticketStatusTranslations[payload[0].name as TicketStatus]) {
-            translatedName = ticketStatusTranslations[payload[0].name as TicketStatus];
-        } 
-        // Si no es un estado, intentar traducir como prioridad de ticket
-        else if (ticketPriorityTranslations[payload[0].name as TicketPriority]) {
-            translatedName = ticketPriorityTranslations[payload[0].name as TicketPriority];
-        }
+// Registrar los componentes necesarios de Chart.js
+ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend, ArcElement);
 
-        return (
-            <div className="custom-tooltip bg-white p-3 border border-gray-300 rounded-lg shadow-md">
-                <p className="label text-gray-800 font-semibold">{`${translatedName}`}</p>
-                {payload.map((entry: any, index: number) => (
-                    <p key={`item-${index}`} style={{ color: entry.color }} className="text-gray-700">
-                        {`${entry.name === 'avgResolutionTimeHours' ? 'Tiempo Resolución (Horas)' : entry.name === 'resolvedTickets' ? 'Tickets Resueltos' : entry.name === 'totalTickets' ? 'Total Tickets' : translatedName}: ${entry.value}`}
-                    </p>
-                ))}
-            </div>
-        );
-    }
-    return null;
-};
-
-
-const Reports: React.FC = () => {
-    const { token, signOut } = useAuth();
+const ReportsDashboard: React.FC = () => {
+    const { token } = useAuth();
     const { addNotification } = useNotification();
-
-    const [metrics, setMetrics] = useState<ReportMetrics | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
 
-    const fetchReportMetrics = useCallback(async () => {
+    const [totalTickets, setTotalTickets] = useState(0);
+    const [openTickets, setOpenTickets] = useState(0);
+    const [inProgressTickets, setInProgressTickets] = useState(0);
+    const [closedTickets, setClosedTickets] = useState(0);
+    const [reopenedTickets, setReopenedTickets] = useState(0);
+    const [totalUsers, setTotalUsers] = useState(0);
+    const [totalDepartments, setTotalDepartments] = useState(0);
+    // Asegúrate de que estos estados coincidan con la estructura de ReportMetrics
+    const [ticketsByDepartment, setTicketsByDepartment] = useState<{ departmentName: string; count: number }[]>([]);
+    const [ticketsByStatus, setTicketsByStatus] = useState<{ status: string; count: number }[]>([]);
+    const [ticketsByPriority, setTicketsByPriority] = useState<{ priority: string; count: number }[]>([]);
+    const [recentActivityLogs, setRecentActivityLogs] = useState<ActivityLog[]>([]);
+
+    const fetchReportData = useCallback(async () => {
+        if (!token) {
+            setLoading(false);
+            setError('No autorizado para cargar reportes.');
+            addNotification('No autorizado para cargar reportes.', 'error');
+            return;
+        }
         setLoading(true);
         setError(null);
         try {
-            if (!token) {
-                throw new Error('No autorizado. Token no disponible.');
-            }
-            const response = await api.get('/api/dashboard/metrics', { // Reutilizamos el endpoint de métricas
-                headers: { Authorization: `Bearer ${token}` },
-            });
-            setMetrics(response.data);
+            const [
+                metricsResponse,
+                ticketsByDeptResponse,
+                ticketsByStatusResponse,
+                ticketsByPriorityResponse,
+                activityLogsResponse
+            ] = await Promise.all([
+                api.get<ReportMetrics>('/api/dashboard/metrics', { headers: { Authorization: `Bearer ${token}` } }),
+                // El backend debería devolver un array de objetos con { department_name: string; count: number }
+                api.get<{ department_name: string; count: number }[]>('/api/reports/tickets-by-department', { headers: { Authorization: `Bearer ${token}` } }),
+                api.get<{ status: string; count: number }[]>('/api/reports/tickets-by-status', { headers: { Authorization: `Bearer ${token}` } }),
+                api.get<{ priority: string; count: number }[]>('/api/reports/tickets-by-priority', { headers: { Authorization: `Bearer ${token}` } }),
+                api.get<{ logs: ActivityLog[] }>('/api/activity-logs?limit=10', { headers: { Authorization: `Bearer ${token}` } })
+            ]);
+
+            setTotalTickets(metricsResponse.data.totalTickets);
+            setOpenTickets(metricsResponse.data.openTickets);
+            setInProgressTickets(metricsResponse.data.inProgressTickets);
+            setClosedTickets(metricsResponse.data.closedTickets);
+            setReopenedTickets(metricsResponse.data.reopenedTickets);
+            setTotalUsers(metricsResponse.data.totalUsers);
+            setTotalDepartments(metricsResponse.data.totalDepartments);
+
+            // CORREGIDO: Mapear a { departmentName: string; count: number } si el backend devuelve department_name
+            const transformedTicketsByDepartment = (ticketsByDeptResponse.data || []).map(item => ({
+                departmentName: item.department_name, // Usar department_name del backend
+                count: item.count
+            }));
+            setTicketsByDepartment(transformedTicketsByDepartment);
+
+            setTicketsByStatus(ticketsByStatusResponse.data || []);
+            setTicketsByPriority(ticketsByPriorityResponse.data || []);
+            setRecentActivityLogs(activityLogsResponse.data.logs || []);
+
         } catch (err: unknown) {
+            console.error('Error fetching report data:', err);
             if (isAxiosErrorTypeGuard(err)) {
                 const apiError = err.response?.data as ApiResponseError;
-                setError(apiError?.message || 'Error al cargar los informes.');
-                addNotification(`Error al cargar informes: ${apiError?.message || 'Error desconocido'}`, 'error');
-                if (err.response?.status === 401) signOut();
+                setError(apiError?.message || 'Error al cargar los datos del reporte.');
+                addNotification(`Error al cargar reportes: ${apiError?.message || 'Error desconocido'}`, 'error');
             } else {
-                setError('Ocurrió un error inesperado al cargar los informes.');
+                setError('Ocurrió un error inesperado al cargar los datos del reporte.');
+                addNotification('Ocurrió un error inesperado al cargar los datos del reporte.', 'error');
             }
-            console.error('Error fetching report metrics:', err);
         } finally {
             setLoading(false);
         }
-    }, [token, addNotification, signOut]);
+    }, [token, addNotification]);
 
     useEffect(() => {
-        fetchReportMetrics();
-    }, [fetchReportMetrics]);
+        fetchReportData();
+    }, [fetchReportData]);
 
-    // Datos para los gráficos, memoizados para optimizar el rendimiento
-    const ticketsByStatusData = React.useMemo(() => {
-        return metrics?.ticketsByStatus?.map(item => ({
-            name: translateTerm(item.name, 'status'),
-            value: item.value
-        })) || [];
-    }, [metrics]);
+    const departmentChartData = {
+        // CORREGIDO: Usar departmentName para las etiquetas del gráfico
+        labels: ticketsByDepartment.map(d => d.departmentName),
+        datasets: [
+            {
+                label: 'Tickets por Departamento',
+                data: ticketsByDepartment.map(d => d.count),
+                backgroundColor: 'rgba(75, 192, 192, 0.6)',
+                borderColor: 'rgba(75, 192, 192, 1)',
+                borderWidth: 1,
+            },
+        ],
+    };
 
-    const ticketsByPriorityData = React.useMemo(() => {
-        return metrics?.ticketsByPriority?.map(item => ({
-            name: translateTerm(item.name, 'priority'),
-            value: item.value
-        })) || [];
-    }, [metrics]);
+    const statusChartData = {
+        labels: ticketsByStatus.map(s => s.status),
+        datasets: [
+            {
+                label: 'Tickets por Estado',
+                data: ticketsByStatus.map(s => s.count),
+                backgroundColor: [
+                    'rgba(255, 99, 132, 0.6)', // open
+                    'rgba(54, 162, 235, 0.6)', // in-progress
+                    'rgba(255, 206, 86, 0.6)', // resolved
+                    'rgba(75, 192, 192, 0.6)', // closed
+                    'rgba(153, 102, 255, 0.6)', // reopened
+                ],
+                borderColor: [
+                    'rgba(255, 99, 132, 1)',
+                    'rgba(54, 162, 235, 1)',
+                    'rgba(255, 206, 86, 1)',
+                    'rgba(75, 192, 192, 1)',
+                    'rgba(153, 102, 255, 1)',
+                ],
+                borderWidth: 1,
+            },
+        ],
+    };
 
-    const ticketsCreatedOverTimeData = React.useMemo(() => {
-        return metrics?.ticketsCreatedOverTime || [];
-    }, [metrics]);
-
-    const ticketsByStatusOverTimeData = React.useMemo(() => {
-        return metrics?.ticketsByStatusOverTime || [];
-    }, [metrics]);
-
-    const ticketsByPriorityOverTimeData = React.useMemo(() => {
-        return metrics?.ticketsByPriorityOverTime || [];
-    }, [metrics]);
-
-    const agentPerformanceData = React.useMemo(() => {
-        return metrics?.agentPerformance?.map(agent => ({
-            agentName: agent.agentName,
-            resolvedTickets: agent.resolvedTickets,
-            avgResolutionTimeHours: agent.avgResolutionTimeHours
-        })) || [];
-    }, [metrics]);
-
-    const departmentPerformanceData = React.useMemo(() => {
-        return metrics?.departmentPerformance?.map(dept => ({
-            departmentName: dept.departmentName,
-            totalTickets: dept.totalTickets,
-            avgResolutionTimeHours: dept.avgResolutionTimeHours
-        })) || [];
-    }, [metrics]);
-
-
-    const PIE_COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#A28DFF', '#FF6B6B'];
+    const priorityChartData = {
+        labels: ticketsByPriority.map(p => p.priority),
+        datasets: [
+            {
+                label: 'Tickets por Prioridad',
+                data: ticketsByPriority.map(p => p.count),
+                backgroundColor: [
+                    'rgba(255, 159, 64, 0.6)', // low
+                    'rgba(255, 99, 132, 0.6)', // medium
+                    'rgba(54, 162, 235, 0.6)', // high
+                    'rgba(153, 102, 255, 0.6)', // urgent
+                ],
+                borderColor: [
+                    'rgba(255, 159, 64, 1)',
+                    'rgba(255, 99, 132, 1)',
+                    'rgba(54, 162, 235, 1)',
+                    'rgba(153, 102, 255, 1)',
+                ],
+                borderWidth: 1,
+            },
+        ],
+    };
 
     if (loading) {
-        return (
-            <div className="flex justify-center items-center h-screen bg-gray-100 text-gray-700">
-                <p className="text-lg">Cargando informes...</p>
-            </div>
-        );
+        return <div className="flex justify-center items-center h-full"><span className="text-lg">Cargando reportes...</span></div>;
     }
 
     if (error) {
-        return (
-            <div className="text-center p-8 text-red-500 bg-white rounded-lg shadow-lg m-4">
-                <h2 className="text-2xl font-bold mb-4">Error al cargar los Informes</h2>
-                <p>{error}</p>
-                <button onClick={fetchReportMetrics} className="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded mt-4">Recargar</button>
-            </div>
-        );
-    }
-
-    if (!metrics) {
-        return (
-            <div className="text-center p-8 text-gray-700 bg-white rounded-lg shadow-lg m-4">
-                <p className="text-lg">No hay datos de informes disponibles.</p>
-            </div>
-        );
+        return <div className="text-red-500 text-center p-4">Error: {error}</div>;
     }
 
     return (
-        <div className="reports-dashboard p-4">
-            <h2 className="text-2xl font-bold text-gray-800 mb-6 text-center">Informes y Estadísticas del Sistema</h2>
-            <p className="text-gray-700 mb-8 text-center">Visualiza métricas clave y tendencias de tickets, usuarios y departamentos.</p>
+        <div className="container mx-auto p-4 sm:p-6 lg:p-8">
+            <h1 className="text-3xl font-bold text-gray-800 mb-6 border-b-2 border-blue-300 pb-2">Reportes y Estadísticas</h1>
 
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                {/* Tickets por Estado (Pie Chart) */}
-                <div className="bg-white p-4 rounded-lg shadow-md">
-                    <h3 className="text-xl font-semibold text-gray-800 mb-4 text-center">Tickets por Estado</h3>
-                    <ResponsiveContainer width="100%" height={300}>
-                        <PieChart>
-                            <Pie
-                                data={ticketsByStatusData}
-                                cx="50%"
-                                cy="50%"
-                                labelLine={false}
-                                outerRadius={80}
-                                fill="#8884d8"
-                                dataKey="value"
-                                nameKey="name"
-                                label={({ name, percent }) => `${name} (${((percent || 0) * 100).toFixed(0)}%)`}
-                            >
-                                {ticketsByStatusData.map((entry, index) => (
-                                    <Cell key={`status-pie-cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+                <div className="bg-white p-6 rounded-lg shadow-md flex items-center justify-between">
+                    <div><p className="text-gray-500 text-sm font-medium">Tickets Totales</p><p className="text-3xl font-bold text-gray-900">{totalTickets}</p></div>
+                    <div className="text-blue-500"><svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 5v2m0 4v2m0 4v2M5 5a2 2 0 00-2 2v3a2 2 0 110 4v3a2 2 0 002 2h14a2 2 0 002-2v-3a2 2 0 110-4V7a2 2 0 00-2-2H5z"></path></svg></div>
+                </div>
+                <div className="bg-white p-6 rounded-lg shadow-md flex items-center justify-between">
+                    <div><p className="text-gray-500 text-sm font-medium">Tickets Abiertos</p><p className="text-3xl font-bold text-gray-900">{openTickets}</p></div>
+                    <div className="text-green-500"><svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg></div>
+                </div>
+                <div className="bg-white p-6 rounded-lg shadow-md flex items-center justify-between">
+                    <div><p className="text-gray-500 text-sm font-medium">Tickets En Progreso</p><p className="text-3xl font-bold text-gray-900">{inProgressTickets}</p></div>
+                    <div className="text-yellow-500"><svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg></div>
+                </div>
+                <div className="bg-white p-6 rounded-lg shadow-md flex items-center justify-between">
+                    <div><p className="text-gray-500 text-sm font-medium">Tickets Cerrados</p><p className="text-3xl font-bold text-gray-900">{closedTickets}</p></div>
+                    <div className="text-red-500"><svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg></div>
+                </div>
+                <div className="bg-white p-6 rounded-lg shadow-md flex items-center justify-between">
+                    <div><p className="text-gray-500 text-sm font-medium">Tickets Reabiertos</p><p className="text-3xl font-bold text-gray-900">{reopenedTickets}</p></div>
+                    <div className="text-purple-500"><svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 0020 13a8 8 0 00-15.356-2m0 0v5h.581m15.356-5H21"></path></svg></div>
+                </div>
+                <div className="bg-white p-6 rounded-lg shadow-md flex items-center justify-between">
+                    <div><p className="text-gray-500 text-sm font-medium">Total Usuarios</p><p className="text-3xl font-bold text-gray-900">{totalUsers}</p></div>
+                    <div className="text-indigo-500"><svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H2v-2a3 3 0 015.356-1.857M17 20v-2c0-.653-.127-1.285-.356-1.857M2 20v-2A3 3 0 017.356 16.143M12 10a6 6 0 110-12 6 6 0 010 12zm0 0a6 6 0 00-6-6h-2a2 2 0 00-2 2v4a2 2 0 002 2h2a6 6 0 006-6z"></path></svg></div>
+                </div>
+                <div className="bg-white p-6 rounded-lg shadow-md flex items-center justify-between">
+                    <div><p className="text-gray-500 text-sm font-medium">Total Departamentos</p><p className="text-3xl font-bold text-gray-900">{totalDepartments}</p></div>
+                    <div className="text-teal-500"><svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m-1 4h1m8-10h1m-1 4h1m-1 4h1m0 0h-9"></path></svg></div>
+                </div>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+                <div className="bg-white p-6 rounded-lg shadow-md">
+                    <h2 className="text-xl font-bold text-gray-800 mb-4 border-b pb-2">Tickets por Departamento</h2>
+                    {ticketsByDepartment.length > 0 ? (
+                        <Bar data={departmentChartData} />
+                    ) : (
+                        <p className="text-gray-600">No hay datos de tickets por departamento.</p>
+                    )}
+                </div>
+                <div className="bg-white p-6 rounded-lg shadow-md">
+                    <h2 className="text-xl font-bold text-gray-800 mb-4 border-b pb-2">Tickets por Estado</h2>
+                    {ticketsByStatus.length > 0 ? (
+                        <Pie data={statusChartData} />
+                    ) : (
+                        <p className="text-gray-600">No hay datos de tickets por estado.</p>
+                    )}
+                </div>
+                <div className="bg-white p-6 rounded-lg shadow-md">
+                    <h2 className="text-xl font-bold text-gray-800 mb-4 border-b pb-2">Tickets por Prioridad</h2>
+                    {ticketsByPriority.length > 0 ? (
+                        <Pie data={priorityChartData} />
+                    ) : (
+                        <p className="text-gray-600">No hay datos de tickets por prioridad.</p>
+                    )}
+                </div>
+            </div>
+
+            <div className="bg-white p-6 rounded-lg shadow-md">
+                <h2 className="text-xl font-bold text-gray-800 mb-4 border-b pb-2">Actividad Reciente</h2>
+                {recentActivityLogs.length > 0 ? (
+                    <div className="overflow-x-auto">
+                        <table className="min-w-full divide-y divide-gray-200">
+                            <thead className="bg-gray-50">
+                                <tr>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Usuario</th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Rol</th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Descripción</th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Fecha</th>
+                                </tr>
+                            </thead>
+                            <tbody className="bg-white divide-y divide-gray-200">
+                                {recentActivityLogs.map((log) => (
+                                    <tr key={log.id}>
+                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{log.user_username}</td>
+                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{log.user_role}</td>
+                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{log.description}</td>
+                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{new Date(log.created_at).toLocaleString()}</td>
+                                    </tr>
                                 ))}
-                            </Pie>
-                            <Tooltip content={<CustomTooltip />} />
-                            <Legend layout="vertical" align="right" verticalAlign="middle" />
-                        </PieChart>
-                    </ResponsiveContainer>
-                </div>
-
-                {/* Tickets por Prioridad (Pie Chart) */}
-                <div className="bg-white p-4 rounded-lg shadow-md">
-                    <h3 className="text-xl font-semibold text-gray-800 mb-4 text-center">Tickets por Prioridad</h3>
-                    <ResponsiveContainer width="100%" height={300}>
-                        <PieChart>
-                            <Pie
-                                data={ticketsByPriorityData}
-                                cx="50%"
-                                cy="50%"
-                                labelLine={false}
-                                outerRadius={80}
-                                fill="#82ca9d"
-                                dataKey="value"
-                                nameKey="name"
-                                label={({ name, percent }) => `${name} (${((percent || 0) * 100).toFixed(0)}%)`}
-                            >
-                                {ticketsByPriorityData.map((entry, index) => (
-                                    <Cell key={`priority-pie-cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />
-                                ))}
-                            </Pie>
-                            <Tooltip content={<CustomTooltip />} />
-                            <Legend layout="vertical" align="right" verticalAlign="middle" />
-                        </PieChart>
-                    </ResponsiveContainer>
-                </div>
-
-                {/* Tickets Creados a lo largo del tiempo (Line Chart) */}
-                <div className="col-span-1 lg:col-span-2 bg-white p-4 rounded-lg shadow-md">
-                    <h3 className="text-xl font-semibold text-gray-800 mb-4 text-center">Tickets Creados (Tendencia)</h3>
-                    <ResponsiveContainer width="100%" height={300}>
-                        <LineChart data={ticketsCreatedOverTimeData} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
-                            <CartesianGrid strokeDasharray="3 3" stroke="#ccc" />
-                            <XAxis dataKey="date" />
-                            <YAxis />
-                            <Tooltip />
-                            <Legend />
-                            <Line type="monotone" dataKey="count" stroke="#8884d8" name="Tickets Creados" />
-                        </LineChart>
-                    </ResponsiveContainer>
-                </div>
-
-                {/* Tickets por Estado a lo largo del tiempo (Line Chart) */}
-                <div className="col-span-1 lg:col-span-2 bg-white p-4 rounded-lg shadow-md">
-                    <h3 className="text-xl font-semibold text-gray-800 mb-4 text-center">Tickets por Estado (Tendencia)</h3>
-                    <ResponsiveContainer width="100%" height={300}>
-                        <LineChart data={ticketsByStatusOverTimeData} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
-                            <CartesianGrid strokeDasharray="3 3" stroke="#ccc" />
-                            <XAxis dataKey="date" />
-                            <YAxis />
-                            <Tooltip />
-                            <Legend />
-                            <Line type="monotone" dataKey="open" stroke="#8884d8" name="Abiertos" />
-                            <Line type="monotone" dataKey="inProgress" stroke="#82ca9d" name="En Progreso" />
-                            <Line type="monotone" dataKey="closed" stroke="#ffc658" name="Cerrados" />
-                            <Line type="monotone" dataKey="reopened" stroke="#ff7300" name="Reabiertos" />
-                        </LineChart>
-                    </ResponsiveContainer>
-                </div>
-
-                {/* Tickets por Prioridad a lo largo del tiempo (Line Chart) */}
-                <div className="col-span-1 lg:col-span-2 bg-white p-4 rounded-lg shadow-md">
-                    <h3 className="text-xl font-semibold text-gray-800 mb-4 text-center">Tickets por Prioridad (Tendencia)</h3>
-                    <ResponsiveContainer width="100%" height={300}>
-                        <LineChart data={ticketsByPriorityOverTimeData} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
-                            <CartesianGrid strokeDasharray="3 3" stroke="#ccc" />
-                            <XAxis dataKey="date" />
-                            <YAxis />
-                            <Tooltip />
-                            <Legend />
-                            <Line type="monotone" dataKey="low" stroke="#4CAF50" name="Baja" />
-                            <Line type="monotone" dataKey="medium" stroke="#FFC107" name="Media" />
-                            <Line type="monotone" dataKey="high" stroke="#F44336" name="Alta" />
-                            <Line type="monotone" dataKey="urgent" stroke="#9C27B0" name="Urgente" />
-                        </LineChart>
-                    </ResponsiveContainer>
-                </div>
-
-                {/* Rendimiento de Agentes (Bar Chart) */}
-                <div className="col-span-1 lg:col-span-2 bg-white p-4 rounded-lg shadow-md">
-                    <h3 className="text-xl font-semibold text-gray-800 mb-4 text-center">Rendimiento de Agentes</h3>
-                    <ResponsiveContainer width="100%" height={300}>
-                        <BarChart data={agentPerformanceData} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
-                            <CartesianGrid strokeDasharray="3 3" stroke="#ccc" />
-                            <XAxis dataKey="agentName" />
-                            <YAxis />
-                            <Tooltip content={<CustomTooltip />} />
-                            <Legend />
-                            <Bar dataKey="resolvedTickets" fill="#8884d8" name="Tickets Resueltos" />
-                            <Bar dataKey="avgResolutionTimeHours" fill="#82ca9d" name="Tiempo Resolución (Horas)" />
-                        </BarChart>
-                    </ResponsiveContainer>
-                </div>
-
-                {/* Rendimiento de Departamentos (Bar Chart) */}
-                <div className="col-span-1 lg:col-span-2 bg-white p-4 rounded-lg shadow-md">
-                    <h3 className="text-xl font-semibold text-gray-800 mb-4 text-center">Rendimiento de Departamentos</h3>
-                    <ResponsiveContainer width="100%" height={300}>
-                        <BarChart data={departmentPerformanceData} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
-                            <CartesianGrid strokeDasharray="3 3" stroke="#ccc" />
-                            <XAxis dataKey="departmentName" />
-                            <YAxis />
-                            <Tooltip content={<CustomTooltip />} />
-                            <Legend />
-                            <Bar dataKey="totalTickets" fill="#FFC107" name="Total Tickets" />
-                            <Bar dataKey="avgResolutionTimeHours" fill="#F44336" name="Tiempo Resolución (Horas)" />
-                        </BarChart>
-                    </ResponsiveContainer>
-                </div>
+                            </tbody>
+                        </table>
+                    </div>
+                ) : (
+                    <p className="text-gray-600">No hay logs de actividad recientes.</p>
+                )}
             </div>
         </div>
     );
 };
 
-export default Reports;
+export default ReportsDashboard;

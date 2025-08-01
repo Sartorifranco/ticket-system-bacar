@@ -1,67 +1,105 @@
 // backend/src/controllers/activityLogController.js
 const asyncHandler = require('express-async-handler');
-const pool = require('../config/db'); // Importa tu pool de conexión a la base de datos
+const pool = require('../config/db');
 
-// @desc    Obtener todos los logs de actividad
+// @desc    Get recent activity logs (or all with pagination)
 // @route   GET /api/activity-logs
-// @access  Private (Admin only)
-const getActivityLogs = asyncHandler(async (req, res) => {
-    // req.user viene del middleware 'protect'
-    if (!req.user || req.user.role !== 'admin') {
-        res.status(403);
-        throw new Error('No autorizado para ver el registro de actividad');
-    }
+// @access  Private (Admin only, or Client for their own logs)
+const getRecentActivityLogs = asyncHandler(async (req, res) => {
+    const requestedUserId = req.query.user_id ? parseInt(req.query.user_id, 10) : null;
+    const authenticatedUserId = req.user.id;
+    const authenticatedUserRole = req.user.role;
 
     try {
-        console.log('[DEBUG ActivityLogController] Obteniendo logs de actividad...');
+        console.log('[ActivityLogController] Iniciando obtención de logs de actividad...');
+        
+        const limit = parseInt(req.query.limit, 10) || 10;
+        const offset = parseInt(req.query.offset, 10) || 0;
 
-        // Parámetros de paginación y límite
-        const limit = parseInt(req.query.limit) || 10; // Límite por defecto de 10
-        const offset = parseInt(req.query.offset) || 0; // Offset por defecto de 0
-
-        // Consulta para obtener logs de actividad con paginación
-        // CORRECCIONES:
-        // - 'action_type' cambiado a 'activity_type'
-        // - Eliminadas columnas 'target_type', 'target_id', 'old_value', 'new_value'
-        //   ya que no existen en la tabla 'activity_logs' según el script de creación.
-        // - Añadido t.title para el título del ticket asociado.
-        const [logs] = await pool.query(`
-            SELECT 
+        let query = `
+            SELECT
                 al.id,
                 al.user_id,
-                u.username AS user_username,
-                u.role AS user_role,
-                al.ticket_id, -- Añadido: ID del ticket asociado
-                t.title AS ticket_title, -- Añadido: Título del ticket asociado
-                al.activity_type, -- CORREGIDO: de action_type a activity_type
-                al.description,
+                al.user_username AS username,
+                al.user_role,
+                al.action_type AS action,
+                al.description AS details,
+                al.target_type,
+                al.target_id,
+                al.old_value,
+                al.new_value,
                 al.created_at
             FROM activity_logs al
-            LEFT JOIN users u ON al.user_id = u.id
-            LEFT JOIN tickets t ON al.ticket_id = t.id -- Añadido JOIN para obtener el título del ticket
-            ORDER BY al.created_at DESC
-            LIMIT ? OFFSET ?
-        `, [limit, offset]);
+        `;
+        const queryParams = [];
+        const whereClauses = [];
 
-        // Consulta para obtener el total de logs (para paginación)
-        const [totalLogsResult] = await pool.query('SELECT COUNT(*) AS total FROM activity_logs');
+        // Lógica de filtrado de user_id en el controlador:
+        // Si es un cliente, SIEMPRE filtra por su propio user_id.
+        // Si es un admin, y se proporciona un user_id en la query, filtra por ese user_id.
+        if (authenticatedUserRole === 'client') {
+            whereClauses.push('al.user_id = ?');
+            queryParams.push(authenticatedUserId);
+        } else if (authenticatedUserRole === 'admin' && requestedUserId) {
+            whereClauses.push('al.user_id = ?');
+            queryParams.push(requestedUserId);
+        }
+        // Si es admin y no se proporciona requestedUserId, no se añade filtro de user_id (ve todos).
+
+        if (whereClauses.length > 0) {
+            query += ` WHERE ${whereClauses.join(' AND ')}`;
+        }
+
+        query += ` ORDER BY al.created_at DESC LIMIT ? OFFSET ?`;
+        queryParams.push(limit, offset);
+
+        console.log(`[ActivityLogController] Consulta final: ${query}`);
+        console.log(`[ActivityLogController] Parámetros de consulta: ${queryParams}`);
+
+        const [logs] = await pool.execute(query, queryParams);
+
+        const parsedLogs = logs.map(log => ({
+            ...log,
+            old_value: typeof log.old_value === 'string' && log.old_value !== null ? JSON.parse(log.old_value) : log.old_value,
+            new_value: typeof log.new_value === 'string' && log.new_value !== null ? JSON.parse(log.new_value) : log.new_value,
+        }));
+
+        // Obtener el total de logs (con los mismos filtros)
+        let totalCountQuery = `SELECT COUNT(*) AS total FROM activity_logs al`;
+        const totalCountParams = [];
+        const totalCountWhereClauses = [];
+
+        if (authenticatedUserRole === 'client') {
+            totalCountWhereClauses.push('al.user_id = ?');
+            totalCountParams.push(authenticatedUserId);
+        } else if (authenticatedUserRole === 'admin' && requestedUserId) {
+            totalCountWhereClauses.push('al.user_id = ?');
+            totalCountParams.push(requestedUserId);
+        }
+
+        if (totalCountWhereClauses.length > 0) {
+            totalCountQuery += ` WHERE ${totalCountWhereClauses.join(' AND ')}`;
+        }
+
+        const [totalLogsResult] = await pool.execute(totalCountQuery, totalCountParams);
         const totalLogs = totalLogsResult[0].total;
 
-        console.log('[DEBUG ActivityLogController] Logs de actividad obtenidos:', logs.length, 'de', totalLogs);
+        console.log(`[ActivityLogController] Logs obtenidos: ${parsedLogs.length} resultados. Total en DB (filtrado): ${totalLogs}`);
+
         res.status(200).json({
-            logs,
+            success: true,
+            data: parsedLogs,
+            count: parsedLogs.length,
             total: totalLogs,
-            page: Math.floor(offset / limit) + 1,
-            pages: Math.ceil(totalLogs / limit)
         });
 
     } catch (error) {
-        console.error('[ActivityLogController Error] Error al obtener logs de actividad:', error.message, error.stack); // Imprime detalles del error
+        console.error('[ActivityLogController Error] Error al obtener logs de actividad:', error.message, error.stack);
         res.status(500);
         throw new Error('Error del servidor al obtener logs de actividad');
     }
 });
 
 module.exports = {
-    getActivityLogs
+    getRecentActivityLogs,
 };

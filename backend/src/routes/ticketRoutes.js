@@ -1,6 +1,5 @@
 // backend/src/routes/ticketRoutes.js
 const express = require('express');
-const router = express.Router();
 const {
     getAllTickets,
     getTicketById,
@@ -8,43 +7,46 @@ const {
     updateTicket,
     deleteTicket,
     addCommentToTicket,
-    // Las siguientes funciones deben existir en ticketController.js si se usan aquí
-    // getCommentsForTicket, // Si tienes una ruta GET específica para comentarios
-    // assignTicketToAgent,  // Si tienes una ruta PUT específica para asignar
-    // changeTicketStatus,   // Si tienes una ruta PUT específica para cambiar estado
-    // uploadAttachment      // Si tienes una ruta POST específica para adjuntos
+    getTicketComments
 } = require('../controllers/ticketController');
+// CAMBIADO: Importa 'authenticateToken' en lugar de 'protect'
+const { authenticateToken, authorize } = require('../middleware/authMiddleware'); // <-- ¡CAMBIO AQUÍ!
 
-const { protect, authorize } = require('../middleware/authMiddleware');
+const router = express.Router();
 
-// Si usas Multer para la subida de archivos, necesitarás importarlo y configurarlo aquí.
-// Ejemplo: const multer = require('multer');
-// const upload = multer({ dest: 'uploads/' }); // Configura tu destino de archivos
+// @route   GET /api/tickets
+// @desc    Get all tickets (Admin, Agent) or client's own tickets (Client)
+// @access  Private
+router.get('/', authenticateToken, authorize(['admin', 'agent', 'client']), getAllTickets); // <-- ¡CAMBIO AQUÍ!
 
-// Rutas para tickets (colección)
-router.route('/')
-    // GET /api/tickets - Obtener todos los tickets (lógica interna del controlador restringe para 'user' rol)
-    .get(protect, authorize(['admin', 'agent', 'client']), getAllTickets)
-    .post(protect, authorize(['client', 'agent', 'admin']), createTicket); // Permitir a todos los roles crear tickets
+// @route   GET /api/tickets/:id
+// @desc    Get single ticket by ID
+// @access  Private
+router.get('/:id', authenticateToken, authorize(['admin', 'agent', 'client']), getTicketById); // <-- ¡CAMBIO AQUÍ!
 
-// Rutas para tickets (por ID)
-router.route('/:id')
-    // GET /api/tickets/:id - Obtener un ticket por ID
-    .get(protect, authorize(['admin', 'agent', 'client']), getTicketById)
-    // PUT /api/tickets/:id - Actualizar un ticket (Admin y Agente, con restricción para 'user' en controller)
-    .put(protect, authorize(['admin', 'agent', 'client']), updateTicket) // Cliente puede actualizar si la lógica en controller lo permite (ej. reabrir)
-    // DELETE /api/tickets/:id - Eliminar un ticket (solo Admin)
-    .delete(protect, authorize(['admin']), deleteTicket);
+// @route   POST /api/tickets
+// @desc    Create new ticket
+// @access  Private (Client only for now, can be extended)
+router.post('/', authenticateToken, authorize(['client', 'admin']), createTicket); // <-- ¡CAMBIO AQUÍ!
 
-// Rutas para comentarios (POST para añadir)
-router.post('/:id/comments', protect, authorize(['client', 'agent', 'admin']), addCommentToTicket);
+// @route   PUT /api/tickets/:id
+// @desc    Update ticket
+// @access  Private (Admin, Agent)
+router.put('/:id', authenticateToken, authorize(['admin', 'agent']), updateTicket); // <-- ¡CAMBIO AQUÍ!
 
-// Si tienes rutas específicas para estas funcionalidades y están implementadas en el controlador:
-/*
-router.get('/:id/comments', protect, authorize(['client', 'agent', 'admin']), getCommentsForTicket); // Si tienes un GET para comentarios
-router.put('/:id/assign', protect, authorize(['admin', 'agent']), assignTicketToAgent); // Si tienes una ruta específica para asignar
-router.put('/:id/status', protect, authorize(['admin', 'agent', 'client']), changeTicketStatus); // Si tienes una ruta específica para cambiar estado
-router.post('/:id/upload', protect, authorize(['client', 'agent', 'admin']), upload.single('attachment'), uploadAttachment); // Si tienes una ruta específica para adjuntos
-*/
+// @route   DELETE /api/tickets/:id
+// @desc    Delete ticket
+// @access  Private (Admin only)
+router.delete('/:id', authenticateToken, authorize(['admin']), deleteTicket); // <-- ¡CAMBIO AQUÍ!
+
+// @route   POST /api/tickets/:id/comments
+// @desc    Add comment to ticket
+// @access  Private
+router.post('/:id/comments', authenticateToken, authorize(['admin', 'agent', 'client']), addCommentToTicket); // <-- ¡CAMBIO AQUÍ!
+
+// @route   GET /api/tickets/:id/comments
+// @desc    Get comments for a ticket
+// @access  Private
+router.get('/:id/comments', authenticateToken, authorize(['admin', 'agent', 'client']), getTicketComments); // <-- ¡CAMBIO AQUÍ!
 
 module.exports = router;

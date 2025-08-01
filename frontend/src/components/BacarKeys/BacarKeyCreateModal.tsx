@@ -3,7 +3,7 @@ import React, { useState, useCallback } from 'react';
 import Modal from '../Common/Modal'; // Asegúrate de que la ruta a tu componente Modal sea correcta
 import api from '../../config/axiosConfig';
 import { useAuth } from '../../context/AuthContext';
-import { useNotification } from '../../context/NotificationContext'; // <-- AÑADIDO: Importar useNotification
+import { useNotification } from '../../context/NotificationContext';
 import { isAxiosErrorTypeGuard, ApiResponseError } from '../../utils/typeGuards';
 
 interface BacarKeyCreateModalProps {
@@ -17,8 +17,8 @@ const BacarKeyCreateModal: React.FC<BacarKeyCreateModalProps> = ({
     onClose,
     onCreateSuccess,
 }) => {
-    const { token } = useAuth(); // <-- MODIFICADO: Solo token de useAuth
-    const { addNotification } = useNotification(); // <-- AÑADIDO: addNotification de useNotification
+    const { token } = useAuth();
+    const { addNotification } = useNotification();
     const [newDeviceUser, setNewDeviceUser] = useState<string>('');
     const [newUsername, setNewUsername] = useState<string>('');
     const [newPassword, setNewPassword] = useState<string>('');
@@ -39,7 +39,10 @@ const BacarKeyCreateModal: React.FC<BacarKeyCreateModalProps> = ({
 
         try {
             if (!token) {
-                throw new Error('No autorizado. Token no disponible.');
+                // No es necesario lanzar un error aquí, la notificación ya es suficiente.
+                addNotification('No autorizado. Token no disponible.', 'error');
+                setLoading(false);
+                return;
             }
 
             const payload = {
@@ -67,6 +70,7 @@ const BacarKeyCreateModal: React.FC<BacarKeyCreateModalProps> = ({
                 addNotification(`Error al crear clave: ${apiError?.message || 'Error desconocido'}`, 'error');
             } else {
                 setError('Ocurrió un error inesperado al crear la clave Bacar.');
+                addNotification('Ocurrió un error inesperado al crear la clave Bacar.', 'error');
             }
             console.error('Error creating Bacar key:', err);
         } finally {
@@ -77,51 +81,51 @@ const BacarKeyCreateModal: React.FC<BacarKeyCreateModalProps> = ({
     return (
         <Modal isOpen={isOpen} onClose={onClose} title="Crear Nueva Clave Bacar">
             <div className="p-4">
-                {error && <p className="error-message text-center p-3 mb-4">{error}</p>}
+                {error && <p className="text-red-600 bg-red-100 p-3 rounded-md text-center mb-4">{error}</p>} {/* Aplicadas clases Tailwind */}
                 <form onSubmit={(e) => { e.preventDefault(); handleCreateKey(); }}>
                     <div className="grid grid-cols-1 gap-4 mb-4">
-                        <div className="form-group">
-                            <label htmlFor="deviceUser" className="form-label">Usuario Dispositivo:</label>
+                        <div className="mb-4"> {/* Reemplazado form-group */}
+                            <label htmlFor="deviceUser" className="block text-gray-700 text-sm font-bold mb-2">Usuario Dispositivo:</label> {/* Reemplazado form-label */}
                             <input
                                 type="text"
                                 id="deviceUser"
-                                className="form-input"
+                                className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" // Reemplazado form-input
                                 value={newDeviceUser}
                                 onChange={(e) => setNewDeviceUser(e.target.value)}
                                 disabled={loading}
                                 required
                             />
                         </div>
-                        <div className="form-group">
-                            <label htmlFor="username" className="form-label">Usuario (Login):</label>
+                        <div className="mb-4"> {/* Reemplazado form-group */}
+                            <label htmlFor="username" className="block text-gray-700 text-sm font-bold mb-2">Usuario (Login):</label> {/* Reemplazado form-label */}
                             <input
                                 type="text"
                                 id="username"
-                                className="form-input"
+                                className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" // Reemplazado form-input
                                 value={newUsername}
                                 onChange={(e) => setNewUsername(e.target.value)}
                                 disabled={loading}
                                 required
                             />
                         </div>
-                        <div className="form-group">
-                            <label htmlFor="password" className="form-label">Contraseña:</label>
+                        <div className="mb-4"> {/* Reemplazado form-group */}
+                            <label htmlFor="password" className="block text-gray-700 text-sm font-bold mb-2">Contraseña:</label> {/* Reemplazado form-label */}
                             <input
                                 type="password"
                                 id="password"
-                                className="form-input"
+                                className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" // Reemplazado form-input
                                 value={newPassword}
                                 onChange={(e) => setNewPassword(e.target.value)}
                                 disabled={loading}
                                 required
                             />
                         </div>
-                        <div className="form-group">
-                            <label htmlFor="notes" className="form-label">Notas (Opcional):</label>
+                        <div className="mb-4"> {/* Reemplazado form-group */}
+                            <label htmlFor="notes" className="block text-gray-700 text-sm font-bold mb-2">Notas (Opcional):</label> {/* Reemplazado form-label */}
                             <input
                                 type="text"
                                 id="notes"
-                                className="form-input"
+                                className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" // Reemplazado form-input
                                 value={newNotes}
                                 onChange={(e) => setNewNotes(e.target.value)}
                                 disabled={loading}
@@ -131,7 +135,7 @@ const BacarKeyCreateModal: React.FC<BacarKeyCreateModalProps> = ({
                     <div className="flex justify-end gap-2 mt-6">
                         <button
                             type="submit"
-                            className="button primary-button"
+                            className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-md transition-colors duration-200" // Reemplazado button primary-button
                             disabled={loading}
                         >
                             {loading ? 'Generando...' : 'Generar Clave'}
@@ -139,7 +143,7 @@ const BacarKeyCreateModal: React.FC<BacarKeyCreateModalProps> = ({
                         <button
                             type="button"
                             onClick={onClose}
-                            className="button secondary-button"
+                            className="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-4 rounded-md transition-colors duration-200" // Reemplazado button secondary-button
                             disabled={loading}
                         >
                             Cancelar

@@ -1,116 +1,128 @@
 // frontend/src/components/Admin/TicketList.tsx
-import React, { useState, useEffect } from 'react';
-import axios from 'axios'; // Mantener axios para axios.isAxiosError
+import React, { useState, useEffect, useCallback } from 'react'; // Añadido useCallback
 import ticketService, { Ticket } from '../../services/ticketService';
-// import './TicketList.css'; // <-- Si tienes un archivo CSS para esto, impórtalo aquí
+import { useAuth } from '../../context/AuthContext'; // Importar useAuth
+import { useNotification } from '../../context/NotificationContext'; // Importar useNotification
+import { isAxiosErrorTypeGuard, ApiResponseError } from '../../utils/typeGuards';
+import { ticketStatusTranslations, ticketPriorityTranslations } from '../../utils/traslations'; // Importar traducciones
 
 interface TicketListProps {
-  onSelectTicket: (ticketId: number) => void;
+    onSelectTicket: (ticketId: number) => void;
 }
 
 const TicketList: React.FC<TicketListProps> = ({ onSelectTicket }) => {
-  const [tickets, setTickets] = useState<Ticket[]>([]);
-  const [loading, setLoading] = useState<boolean>(true);
-  const [error, setError] = useState<string | null>(null);
+    const { token } = useAuth(); // Obtener el token del contexto de autenticación
+    const { addNotification } = useNotification(); // Obtener la función de notificación
+    const [tickets, setTickets] = useState<Ticket[]>([]);
+    const [loading, setLoading] = useState<boolean>(true);
+    const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    const fetchTickets = async () => {
-      try {
+    const fetchTickets = useCallback(async () => {
         setLoading(true);
-        const data = await ticketService.getAllTickets();
+        setError(null);
+        try {
+            if (!token) {
+                addNotification('No autorizado. Por favor, inicia sesión de nuevo.', 'error');
+                setLoading(false);
+                return;
+            }
+            const data = await ticketService.getAllTickets(token); // Pasar el token al servicio
 
-        const statusOrder: { [key: string]: number } = {
-          'open': 1,
-          'assigned': 2,
-          'in_progress': 3,
-          'resolved': 4,
-          'closed': 5,
-        };
+            const statusOrder: { [key: string]: number } = {
+                'open': 1,
+                'assigned': 2,
+                'in_progress': 3,
+                'resolved': 4,
+                'closed': 5,
+            };
 
-        const sortedTickets = data.sort((a, b) => {
-          const statusA = statusOrder[a.status as keyof typeof statusOrder] || 99;
-          const statusB = statusOrder[b.status as keyof typeof statusOrder] || 99;
+            const sortedTickets = data.sort((a, b) => {
+                const statusA = statusOrder[a.status as keyof typeof statusOrder] || 99;
+                const statusB = statusOrder[b.status as keyof typeof statusOrder] || 99;
 
-          if (statusA !== statusB) {
-            return statusA - statusB;
-          }
-          return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
-        });
+                if (statusA !== statusB) {
+                    return statusA - statusB;
+                }
+                return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+            });
 
-        setTickets(sortedTickets);
-      } catch (err: unknown) {
-        if (axios.isAxiosError(err)) {
-          setError(err.response?.data?.message || `Error ${err.response?.status}: ${err.message || 'Error al cargar tickets.'}`);
-        } else {
-          setError('Ocurrió un error inesperado al cargar tickets.');
+            setTickets(sortedTickets);
+        } catch (err: unknown) {
+            if (isAxiosErrorTypeGuard(err)) { // Usar el type guard consistente
+                const apiError = err.response?.data as ApiResponseError;
+                setError(apiError?.message || 'Error al cargar tickets.');
+                addNotification(`Error al cargar tickets: ${apiError?.message || 'Error desconocido'}`, 'error');
+            } else {
+                setError('Ocurrió un error inesperado al cargar tickets.');
+                addNotification('Ocurrió un error inesperado al cargar tickets.', 'error');
+            }
+            console.error('Error al cargar tickets:', err);
+        } finally {
+            setLoading(false);
         }
-        console.error('Error al cargar tickets:', err);
-      } finally {
-        setLoading(false);
-      }
-    };
+    }, [token, addNotification]); // Añadir token y addNotification a las dependencias
 
-    fetchTickets();
-  }, []); // El array de dependencias vacío significa que se ejecuta solo una vez al montar
+    useEffect(() => {
+        fetchTickets();
+    }, [fetchTickets]); // El array de dependencias vacío significa que se ejecuta solo una vez al montar
 
-  if (loading) return <p>Cargando tickets...</p>;
-  if (error) return <p style={{ color: 'red' }}>Error: {error}</p>;
+    if (loading) {
+        return <p className="text-center text-gray-600">Cargando tickets...</p>;
+    }
+    if (error) {
+        return <p className="text-center text-red-500">Error: {error}</p>;
+    }
 
-  return (
-    // ELIMINA containerStyle y usa una clase CSS si es posible
-    <div /* style={containerStyle} */>
-      <h3>Lista de Tickets</h3>
-      {tickets.length === 0 ? (
-        <p>No hay tickets para mostrar.</p>
-      ) : (
-        // ELIMINA tableStyle y usa una clase CSS si es posible
-        <table /* style={tableStyle} */>
-          <thead>
-            <tr>
-              {/* ELIMINA thStyle y usa una clase CSS si es posible */}
-              <th /* style={thStyle} */>ID</th>
-              <th /* style={thStyle} */>Asunto</th>
-              <th /* style={thStyle} */>Estado</th>
-              <th /* style={thStyle} */>Prioridad</th>
-              <th /* style={thStyle} */>Departamento</th>
-              <th /* style={thStyle} */>Usuario</th>
-              <th /* style={thStyle} */>Acciones</th>
-            </tr>
-          </thead>
-          <tbody>
-            {tickets.map((ticket) => (
-              <tr key={ticket.id}>
-                {/* ELIMINA tdStyle y usa una clase CSS si es posible */}
-                <td /* style={tdStyle} */>{ticket.id}</td>
-                <td /* style={tdStyle} */>{ticket.subject}</td>
-                <td /* style={tdStyle} */>{ticket.status}</td>
-                <td /* style={tdStyle} */>{ticket.priority}</td>
-                <td /* style={tdStyle} */>{ticket.department_name || 'N/A'}</td>
-                <td /* style={tdStyle} */>{ticket.user_username || 'N/A'}</td>
-                <td /* style={tdStyle} */>
-                  {/* ELIMINA actionButtonStyle y usa una clase CSS si es posible */}
-                  <button
-                    onClick={() => onSelectTicket(ticket.id)}
-                    /* style={{ ...actionButtonStyle, backgroundColor: '#007bff' }} */
-                    title="Ver Detalles"
-                  >
-                    Ver Detalles
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-    </div>
-  );
+    return (
+        <div className="p-4 bg-white rounded-lg shadow-md">
+            <h3 className="text-2xl font-bold text-gray-800 mb-4">Lista de Tickets</h3>
+            {tickets.length === 0 ? (
+                <p className="text-gray-600">No hay tickets para mostrar.</p>
+            ) : (
+                <div className="overflow-x-auto">
+                    <table className="min-w-full divide-y divide-gray-200">
+                        <thead className="bg-gray-50">
+                            <tr>
+                                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">ID</th>
+                                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Asunto</th>
+                                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Estado</th>
+                                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Prioridad</th>
+                                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Departamento</th>
+                                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Usuario</th>
+                                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Acciones</th>
+                            </tr>
+                        </thead>
+                        <tbody className="bg-white divide-y divide-gray-200">
+                            {tickets.map((ticket) => (
+                                <tr key={ticket.id}>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{ticket.id}</td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{ticket.subject}</td>
+                                    {/* Aplicar traducciones para Estado y Prioridad */}
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                        {ticketStatusTranslations[ticket.status as keyof typeof ticketStatusTranslations] || ticket.status}
+                                    </td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                        {ticketPriorityTranslations[ticket.priority as keyof typeof ticketPriorityTranslations] || ticket.priority}
+                                    </td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{ticket.department_name || 'N/A'}</td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{ticket.user_username || 'N/A'}</td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                                        <button
+                                            onClick={() => onSelectTicket(ticket.id)}
+                                            className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-md transition-colors duration-200"
+                                            title="Ver Detalles"
+                                        >
+                                            Ver Detalles
+                                        </button>
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+            )}
+        </div>
+    );
 };
-
-// ELIMINA TODOS ESTOS ESTILOS EN LÍNEA
-// const containerStyle: React.CSSProperties = { ... };
-// const tableStyle: React.CSSProperties = { ... };
-// const thStyle: React.CSSProperties = { ... };
-// const tdStyle: React.CSSProperties = { ... };
-// const actionButtonStyle: React.CSSProperties = { ... };
 
 export default TicketList;

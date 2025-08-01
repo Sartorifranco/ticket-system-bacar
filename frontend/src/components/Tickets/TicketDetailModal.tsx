@@ -1,432 +1,303 @@
-// frontend/src/components/Tickets/TicketDetailModal.tsx
-// Este componente es un modal para ver y editar los detalles de un ticket.
-// Recibe los datos del ticket y otras dependencias como props.
-
-import React, { useState, useEffect, useCallback, useRef } from 'react'; 
-import Modal from '../Common/Modal'; 
+// src/components/Tickets/TicketDetailModal.tsx
+import React, { useState, useEffect, useCallback } from 'react';
 import api from '../../config/axiosConfig';
-import { TicketData, User, Department, TicketStatus, TicketPriority, Comment } from '../../types';
-import { isAxiosErrorTypeGuard, ApiResponseError } from '../../utils/typeGuards';
 import { useAuth } from '../../context/AuthContext';
-import { useNotification } from '../../context/NotificationContext'; 
+import { useNotification } from '../../context/NotificationContext';
+// CORREGIDO: Importar TicketComment en lugar de Comment
+import { TicketData, Comment, User, Department, TicketStatus, TicketPriority } from '../../types';
+import { isAxiosErrorTypeGuard, ApiResponseError } from '../../utils/typeGuards';
 import { ticketStatusTranslations, ticketPriorityTranslations } from '../../utils/traslations';
-import { format } from 'date-fns'; 
+import { format } from 'date-fns'; // Importar format si lo usas para fechas
 
 interface TicketDetailModalProps {
     isOpen: boolean;
     onClose: () => void;
-    ticket: TicketData;
-    onTicketUpdated: () => void; 
-    token: string | null;
-    departments: Department[];
-    users: User[]; 
+    ticket: TicketData; // El ticket completo para mostrar detalles
+    onSave: (updatedTicket: Partial<TicketData>) => Promise<void>; // Para guardar cambios en el ticket
+    departments: Department[]; // Lista completa de departamentos
+    users: User[]; // Lista completa de usuarios (agentes)
 }
 
-const TicketDetailModal: React.FC<TicketDetailModalProps> = ({ 
-    isOpen, 
-    onClose, 
-    ticket, 
-    onTicketUpdated, 
-    token, 
-    departments, 
-    users 
-}) => {
-    const { user: currentUser } = useAuth(); 
-    const { addNotification } = useNotification(); 
+const TicketDetailModal: React.FC<TicketDetailModalProps> = ({ isOpen, onClose, ticket, onSave, departments, users }) => {
+    const { token, user: currentUser } = useAuth();
+    const { addNotification } = useNotification();
 
-    const [currentTicket, setCurrentTicket] = useState<TicketData>(ticket);
-    const [loading, setLoading] = useState(false);
-    const [error, setError] = useState<string | null>(null);
+    const [editedTitle, setEditedTitle] = useState(ticket.title);
+    const [editedDescription, setEditedDescription] = useState(ticket.description);
+    const [editedStatus, setEditedStatus] = useState<TicketStatus>(ticket.status);
+    const [editedPriority, setEditedPriority] = useState<TicketPriority>(ticket.priority);
+    const [editedDepartmentId, setEditedDepartmentId] = useState<number | null>(ticket.department_id);
+    const [editedAgentId, setEditedAgentId] = useState<number | null>(ticket.assigned_to_user_id);
 
-    const [title, setTitle] = useState(ticket.title); 
-    const [description, setDescription] = useState(ticket.description);
-    const [status, setStatus] = useState<TicketStatus>(ticket.status);
-    const [priority, setPriority] = useState<TicketPriority>(ticket.priority);
-    const [departmentId, setDepartmentId] = useState<number | null>(ticket.department_id);
-    const [agentId, setAgentId] = useState<number | null>(ticket.assigned_to_user_id || null); // Usar assigned_to_user_id
+    // CORREGIDO: Usar TicketComment[]
+    const [comments, setComments] = useState<Comment[]>([]);
+    const [newCommentText, setNewCommentText] = useState('');
+    const [loadingComments, setLoadingComments] = useState(false);
 
-    const [commentText, setCommentText] = useState('');
-    const [isEditing, setIsEditing] = useState(false);
+    const isAdmin = currentUser?.role === 'admin';
+    const isAgent = currentUser?.role === 'agent';
+    const isClient = currentUser?.role === 'client';
+    const isAssignedAgent = isAgent && ticket.assigned_to_user_id === currentUser?.id;
+    const isTicketCreator = isClient && ticket.user_id === currentUser?.id;
 
-    const commentsEndRef = useRef<HTMLDivElement>(null);
+    const canEditTicket = isAdmin || isAssignedAgent;
+    const canAddComment = (isAdmin || isAgent || isTicketCreator); // Admins, agentes, y el creador del ticket pueden comentar
 
-    useEffect(() => {
-        if (isOpen) { 
-            setCurrentTicket(ticket);
-            setTitle(ticket.title); 
-            setDescription(ticket.description);
-            setStatus(ticket.status);
-            setPriority(ticket.priority);
-            setDepartmentId(ticket.department_id);
-            setAgentId(ticket.assigned_to_user_id || null); // Usar assigned_to_user_id
-            setError(null);
-            setIsEditing(false);
-            setCommentText('');
-        }
-    }, [isOpen, ticket]); 
-
-    useEffect(() => {
-        if (commentsEndRef.current) {
-            console.log('[DEBUG TicketDetailModal] Realizando scroll a comentarios.'); 
-            commentsEndRef.current.scrollIntoView({ behavior: 'smooth' });
-        }
-    }, [currentTicket.comments?.length]); 
-
-    const handleSaveEdits = useCallback(async () => {
-        setLoading(true);
-        setError(null);
+    // Fetch comments for the ticket
+    const fetchComments = useCallback(async () => {
+        setLoadingComments(true);
         try {
-            if (!token) {
-                addNotification('No autorizado para actualizar el ticket.', 'error');
-                return;
-            }
-
-            const updatedFields: Partial<TicketData> = {}; 
-            if (title !== currentTicket.title) updatedFields.title = title; 
-            if (description !== currentTicket.description) updatedFields.description = description;
-            if (status !== currentTicket.status) updatedFields.status = status;
-            if (priority !== currentTicket.priority) updatedFields.priority = priority;
-            
-            const departmentIdToSend = departmentId === null || isNaN(departmentId) ? null : departmentId;
-            const agentIdToSend = agentId === null || isNaN(agentId) ? null : agentId;
-
-            if (departmentIdToSend !== currentTicket.department_id) updatedFields.department_id = departmentIdToSend;
-            // Usar assigned_to_user_id para el campo que se envía al backend
-            if (agentIdToSend !== currentTicket.assigned_to_user_id) updatedFields.assigned_to_user_id = agentIdToSend; 
-
-            if (Object.keys(updatedFields).length === 0) {
-                addNotification('No se detectaron cambios para guardar.', 'info');
-                setIsEditing(false);
-                return;
-            }
-
-            console.log('[DEBUG TicketDetailModal] Enviando actualización de ticket con campos:', updatedFields); 
-
-            const response = await api.put(`/api/tickets/${currentTicket.id}`, updatedFields, {
+            const response = await api.get(`/api/tickets/${ticket.id}/comments`, {
                 headers: { Authorization: `Bearer ${token}` },
             });
-            
-            console.log('[DEBUG TicketDetailModal] Respuesta de la API al actualizar ticket:', response.data); 
-            setCurrentTicket(response.data); 
-            console.log('[DEBUG TicketDetailModal] currentTicket después de actualizar estado (assigned_to_user_id):', response.data.assigned_to_user_id, 'agent_username:', response.data.agent_username); 
-
-            addNotification('Ticket actualizado exitosamente.', 'success');
-            onTicketUpdated(); 
-            setIsEditing(false);
+            // Asumiendo que el backend devuelve un array de TicketComment
+            setComments(response.data);
         } catch (err: unknown) {
+            console.error('Error fetching comments:', err);
             if (isAxiosErrorTypeGuard(err)) {
                 const apiError = err.response?.data as ApiResponseError;
-                setError(apiError?.message || 'Error al actualizar el ticket.');
-                addNotification(`Error al actualizar ticket: ${apiError?.message || 'Error desconocido'}`, 'error');
-                console.error('[DEBUG TicketDetailModal] Error de Axios al actualizar ticket:', apiError); 
+                addNotification(`Error al cargar comentarios: ${apiError?.message || 'Error desconocido'}`, 'error');
             } else {
-                setError('Ocurrió un error inesperado al actualizar el ticket.');
-                addNotification('Ocurrió un error inesperado al actualizar el ticket.', 'error');
+                addNotification('Ocurrió un error inesperado al cargar los comentarios.', 'error');
             }
-            console.error('Error updating ticket:', err);
         } finally {
-            setLoading(false);
+            setLoadingComments(false);
         }
-    }, [title, description, status, priority, departmentId, agentId, currentTicket, token, addNotification, onTicketUpdated]);
+    }, [ticket.id, token, addNotification]);
 
-    const handleAddComment = useCallback(async (e: React.FormEvent) => {
+    useEffect(() => {
+        if (isOpen) { // Solo cargar comentarios cuando el modal está abierto
+            fetchComments();
+        }
+    }, [isOpen, fetchComments]);
+
+    const handleSave = async () => {
+        const updatedFields: Partial<TicketData> = {};
+
+        if (editedTitle !== ticket.title) updatedFields.title = editedTitle;
+        if (editedDescription !== ticket.description) updatedFields.description = editedDescription;
+        if (editedStatus !== ticket.status) updatedFields.status = editedStatus;
+        if (editedPriority !== ticket.priority) updatedFields.priority = editedPriority;
+
+        const newDepartmentId = editedDepartmentId === null ? null : editedDepartmentId;
+        if (newDepartmentId !== (ticket.department_id === null ? null : ticket.department_id)) {
+            updatedFields.department_id = newDepartmentId;
+        }
+
+        const newAgentId = editedAgentId === null ? null : editedAgentId;
+        if (newAgentId !== (ticket.assigned_to_user_id === null ? null : ticket.assigned_to_user_id)) {
+            updatedFields.assigned_to_user_id = newAgentId;
+        }
+
+        if (Object.keys(updatedFields).length > 0) {
+            await onSave(updatedFields);
+        }
+        onClose();
+    };
+
+    const handleAddComment = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (!commentText.trim()) {
-            addNotification('El comentario no puede estar vacío.', 'warning');
+        if (!newCommentText.trim() || !token || !currentUser) {
+            addNotification('El comentario no puede estar vacío o no estás autenticado.', 'warning');
             return;
         }
 
-        setLoading(true);
-        setError(null);
         try {
-            if (!token) {
-                addNotification('No autorizado para añadir comentarios.', 'error');
-                return;
-            }
-
-            await api.post(`/api/tickets/${currentTicket.id}/comments`, { message_text: commentText }, {
+            const response = await api.post(`/api/tickets/${ticket.id}/comments`, {
+                comment_text: newCommentText,
+            }, {
                 headers: { Authorization: `Bearer ${token}` },
             });
-            
-            const updatedTicketResponse = await api.get(`/api/tickets/${currentTicket.id}`, {
-                headers: { Authorization: `Bearer ${token}` },
-            });
-            
-            setCurrentTicket(prevTicket => ({
-                ...updatedTicketResponse.data,
-                comments: [...(updatedTicketResponse.data.comments || [])] 
-            }));
-            
-            console.log('[DEBUG TicketDetailModal] currentTicket después de añadir comentario y refrescar:', updatedTicketResponse.data);
-            console.log('[DEBUG TicketDetailModal] Comentarios en el estado actualizado:', updatedTicketResponse.data.comments);
-            
-            setCommentText('');
             addNotification('Comentario añadido exitosamente.', 'success');
-            onTicketUpdated(); 
+            setNewCommentText('');
+            fetchComments(); // Recargar comentarios
         } catch (err: unknown) {
-            console.error('[DEBUG TicketDetailModal] Error completo al añadir comentario:', err);
-            if (isAxiosErrorTypeGuard(err)) {
-                console.error('[DEBUG TicketDetailModal] Datos de respuesta de error de Axios:', err.response?.data);
-            }
-
+            console.error('Error adding comment:', err);
             if (isAxiosErrorTypeGuard(err)) {
                 const apiError = err.response?.data as ApiResponseError;
-                setError(apiError?.message || 'Error al añadir comentario.');
                 addNotification(`Error al añadir comentario: ${apiError?.message || 'Error desconocido'}`, 'error');
             } else {
-                setError('Ocurrió un error inesperado al añadir el comentario.');
                 addNotification('Ocurrió un error inesperado al añadir el comentario.', 'error');
             }
-            console.error('Error adding comment:', err);
-        } finally {
-            setLoading(false);
         }
-    }, [commentText, currentTicket, token, addNotification, onTicketUpdated]); 
-
-    const handleCancelEdit = useCallback(() => {
-        setTitle(ticket.title); 
-        setDescription(ticket.description);
-        setStatus(ticket.status);
-        setPriority(ticket.priority);
-        setDepartmentId(ticket.department_id);
-        setAgentId(ticket.assigned_to_user_id || null); // Usar assigned_to_user_id
-        setIsEditing(false);
-        setError(null);
-    }, [ticket]);
-
-    const formatTimestamp = (isoString: string | null) => { 
-        if (!isoString) return 'N/A'; 
-        return format(new Date(isoString), 'dd/MM/yyyy HH:mm:ss');
     };
 
+    // Estas funciones son útiles si el ticket no trae los nombres directamente
+    // Pero si TicketData ya tiene user_username y department_name, no son estrictamente necesarias
+    // Las mantengo por si las usas en otros lugares o como fallback
     const getDepartmentName = (id: number | null) => {
-        if (!id) return 'N/A';
-        const dept = departments.find(d => d.id === id);
-        return dept ? dept.name : 'Desconocido';
+        return departments.find(d => d.id === id)?.name || 'N/A';
     };
 
-    const getAgentUsername = (id: number | null) => {
-        if (!id) return 'Sin asignar';
-        const agent = users.find(u => u.id === id && u.role === 'agent');
-        return agent ? agent.username : 'Desconocido';
+    const getUserUsername = (id: number | null) => {
+        return users.find(u => u.id === id)?.username || 'Sin Asignar';
     };
-
-    const isAgentOrAdmin = currentUser?.role === 'admin' || currentUser?.role === 'agent';
-    const canEdit = isAgentOrAdmin || (currentUser?.id === currentTicket.user_id && (currentTicket.status === 'open' || currentTicket.status === 'in-progress' || currentTicket.status === 'reopened'));
-    const canAssign = currentUser?.role === 'admin' || (currentUser?.role === 'agent' && (currentTicket.assigned_to_user_id === currentUser.id || currentTicket.assigned_to_user_id === null)); // Usar currentTicket.assigned_to_user_id
-
-    console.log('[DEBUG TicketDetailModal] Prop `users` recibida:', users);
-    const availableAgents = users.filter(u => u.role === 'agent');
-    console.log('[DEBUG TicketDetailModal] Agentes disponibles (filtrados):', availableAgents);
-    console.log('[DEBUG TicketDetailModal] Valor actual de agentId (estado):', agentId);
-    console.log('[DEBUG TicketDetailModal] currentTicket.assigned_to_user_id:', currentTicket.assigned_to_user_id); // Usar currentTicket.assigned_to_user_id
-    console.log('[DEBUG TicketDetailModal] currentTicket.agent_username:', currentTicket.agent_username);
-
 
     if (!isOpen) return null;
 
     return (
-        <Modal isOpen={isOpen} onClose={onClose} title={`Ticket #${currentTicket.id}: ${currentTicket.title}`}>
-            <div className="p-4">
-                {error && <div className="error-message text-center p-3 mb-4">{error}</div>}
-
+        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 flex justify-center items-center z-50 overflow-y-auto p-4">
+            <div className="bg-white p-6 rounded-lg shadow-xl w-full max-w-3xl my-8">
+                <h2 className="text-2xl font-bold mb-4 text-gray-800 border-b pb-2">Detalles del Ticket #{ticket.id}</h2>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-                    <div className="detail-item">
-                        <span className="detail-label">Asunto:</span>
-                        {isEditing && canEdit ? (
-                            <input
-                                type="text"
-                                value={title}
-                                onChange={(e) => setTitle(e.target.value)}
-                                className="form-input"
-                            />
-                        ) : (
-                            <span className="detail-value">{currentTicket.title}</span> 
-                        )}
+                    <div>
+                        <label htmlFor="title" className="block text-gray-700 text-sm font-bold mb-2">Título:</label>
+                        <input
+                            type="text"
+                            id="title"
+                            value={editedTitle}
+                            onChange={(e) => setEditedTitle(e.target.value)}
+                            className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                            disabled={!canEditTicket}
+                        />
                     </div>
-                    <div className="detail-item">
-                        <span className="detail-label">Estado:</span>
-                        {isEditing && canEdit ? (
-                            <select
-                                value={status}
-                                onChange={(e) => setStatus(e.target.value as TicketStatus)}
-                                className="form-select"
-                            >
-                                {Object.entries(ticketStatusTranslations).map(([key, value]) => (
-                                    <option key={key} value={key}>{value}</option> 
-                                ))}
-                            </select>
-                        ) : (
-                            <span className={`status-badge status-${currentTicket.status}`}>
-                                {ticketStatusTranslations[currentTicket.status] || currentTicket.status}
-                            </span>
-                        )}
+                    <div>
+                        <label htmlFor="status" className="block text-gray-700 text-sm font-bold mb-2">Estado:</label>
+                        <select
+                            id="status"
+                            value={editedStatus}
+                            onChange={(e) => setEditedStatus(e.target.value as TicketStatus)}
+                            className="shadow border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                            disabled={!canEditTicket}
+                        >
+                            <option value="open">Abierto</option>
+                            <option value="in-progress">En Progreso</option>
+                            <option value="resolved">Resuelto</option>
+                            <option value="closed">Cerrado</option>
+                            <option value="reopened">Reabierto</option>
+                        </select>
                     </div>
-                    <div className="detail-item">
-                        <span className="detail-label">Prioridad:</span>
-                        {isEditing && canEdit ? (
-                            <select
-                                value={priority}
-                                onChange={(e) => setPriority(e.target.value as TicketPriority)}
-                                className="form-select"
-                            >
-                                {Object.entries(ticketPriorityTranslations).map(([key, value]) => (
-                                    <option key={key} value={key}>{value}</option> 
-                                ))}
-                            </select>
-                        ) : (
-                            <span className={`priority-badge priority-${currentTicket.priority}`}>
-                                {ticketPriorityTranslations[currentTicket.priority] || currentTicket.priority}
-                            </span>
-                        )}
+                    <div>
+                        <label htmlFor="priority" className="block text-gray-700 text-sm font-bold mb-2">Prioridad:</label>
+                        <select
+                            id="priority"
+                            value={editedPriority}
+                            onChange={(e) => setEditedPriority(e.target.value as TicketPriority)}
+                            className="shadow border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                            disabled={!canEditTicket}
+                        >
+                            <option value="low">Baja</option>
+                            <option value="medium">Media</option>
+                            <option value="high">Alta</option>
+                            <option value="urgent">Urgente</option>
+                        </select>
                     </div>
-                    <div className="detail-item">
-                        <span className="detail-label">Departamento:</span>
-                        {isEditing && canEdit ? (
-                            <select
-                                value={departmentId === null ? '' : departmentId}
-                                onChange={(e) => setDepartmentId(parseInt(e.target.value) || null)}
-                                className="form-select"
-                            >
-                                <option value="">Seleccionar Departamento</option>
-                                {departments.map(dept => (
-                                    <option key={dept.id} value={dept.id}>{dept.name}</option>
-                                ))}
-                            </select>
-                        ) : (
-                            <span className="detail-value">{currentTicket.department_name || 'N/A'}</span>
-                        )}
+                    <div>
+                        <label htmlFor="department" className="block text-gray-700 text-sm font-bold mb-2">Departamento:</label>
+                        <select
+                            id="department"
+                            value={editedDepartmentId || ''}
+                            onChange={(e) => setEditedDepartmentId(e.target.value ? parseInt(e.target.value) : null)}
+                            className="shadow border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                            disabled={!canEditTicket}
+                        >
+                            <option value="">Seleccionar Departamento</option>
+                            {departments.map(dept => (
+                                <option key={dept.id} value={dept.id}>{dept.name}</option>
+                            ))}
+                        </select>
                     </div>
-                    <div className="detail-item">
-                        <span className="detail-label">Cliente:</span>
-                        <span className="detail-value">{currentTicket.user_username}</span>
+                    <div>
+                        <label htmlFor="assignedTo" className="block text-gray-700 text-sm font-bold mb-2">Asignado a:</label>
+                        <select
+                            id="assignedTo"
+                            value={editedAgentId || ''}
+                            onChange={(e) => setEditedAgentId(e.target.value ? parseInt(e.target.value) : null)}
+                            className="shadow border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                            disabled={!isAdmin && !isAgent} // Solo admins y agentes pueden asignar
+                        >
+                            <option value="">Sin Asignar</option>
+                            {users.filter(u => u.role === 'agent').map(agent => (
+                                <option key={agent.id} value={agent.id}>{agent.username}</option>
+                            ))}
+                        </select>
                     </div>
-                    <div className="detail-item">
-                        <span className="detail-label">Asignado a:</span>
-                        {isEditing && canAssign ? ( 
-                            <select
-                                value={agentId === null ? '' : agentId}
-                                onChange={(e) => setAgentId(parseInt(e.target.value) || null)}
-                                className="form-select"
-                            >
-                                <option value="">Sin asignar</option>
-                                {availableAgents.map(agent => ( 
-                                    <option key={agent.id} value={agent.id}>{agent.username}</option>
-                                ))}
-                            </select>
-                        ) : (
-                            <span className="detail-value">{currentTicket.agent_username || 'N/A'}</span>
-                        )}
+                    <div>
+                        <label className="block text-gray-700 text-sm font-bold mb-2">Creado por:</label>
+                        {/* Usar ticket.user_username directamente si el backend lo proporciona */}
+                        <p className="py-2 px-3 bg-gray-100 rounded text-gray-700">{ticket.user_username}</p>
                     </div>
-                    <div className="detail-item">
-                        <span className="detail-label">Creado:</span>
-                        <span className="detail-value">{formatTimestamp(currentTicket.created_at)}</span>
+                    <div>
+                        <label className="block text-gray-700 text-sm font-bold mb-2">Fecha de Creación:</label>
+                        <p className="py-2 px-3 bg-gray-100 rounded text-gray-700">{new Date(ticket.created_at).toLocaleString()}</p>
                     </div>
-                    <div className="detail-item">
-                        <span className="detail-label">Última Actualización:</span>
-                        <span className="detail-value">{formatTimestamp(currentTicket.updated_at)}</span>
-                    </div>
-                    {currentTicket.closed_at && ( 
-                        <div className="detail-item">
-                            <span className="detail-label">Fecha Cierre:</span>
-                            <span className="detail-value">{formatTimestamp(currentTicket.closed_at)}</span> 
+                    {/* Mostrar closed_at solo si existe */}
+                    {ticket.closed_at && (
+                        <div>
+                            <label className="block text-gray-700 text-sm font-bold mb-2">Fecha de Cierre:</label>
+                            <p className="py-2 px-3 bg-gray-100 rounded text-gray-700">{new Date(ticket.closed_at).toLocaleString()}</p>
                         </div>
                     )}
                 </div>
-
                 <div className="mb-6">
-                    <span className="detail-label block mb-2">Descripción:</span>
-                    {isEditing && canEdit ? (
-                        <textarea
-                            value={description}
-                            onChange={(e) => setDescription(e.target.value)}
-                            className="form-input w-full"
-                            rows={4}
-                        ></textarea>
-                    ) : (
-                        <p className="p-3 bg-gray-50 rounded-md border border-gray-200 text-gray-800 whitespace-pre-wrap">{currentTicket.description}</p>
-                    )}
-                </div>
-
-                <h3 className="text-xl font-bold text-gray-800 mb-4 border-t pt-4">Comentarios</h3>
-                <div className="max-h-60 overflow-y-auto border border-gray-200 rounded-md p-3 mb-4 bg-gray-50">
-                    <> 
-                        {console.log('[DEBUG Render - Comentarios] currentTicket.comments:', currentTicket.comments)}
-                        {Array.isArray(currentTicket.comments) && currentTicket.comments.length > 0 ? (
-                            currentTicket.comments.map((comment: Comment) => (
-                                <div key={comment.id} className="bg-white p-3 rounded-lg shadow-sm mb-3 last:mb-0">
-                                    <p className="text-gray-700">
-                                        <span className="font-semibold">{comment.user_username}:</span> {comment.message} 
-                                    </p>
-                                    <p className="text-sm text-gray-500 text-right">
-                                        {formatTimestamp(comment.created_at)}
-                                    </p>
-                                </div>
-                            ))
-                        ) : (
-                            <p className="text-gray-600">No hay comentarios para este ticket.</p>
-                        )}
-                        <div ref={commentsEndRef} />
-                    </>
-                </div>
-
-                <form onSubmit={handleAddComment} className="flex flex-col gap-3">
+                    <label htmlFor="description" className="block text-gray-700 text-sm font-bold mb-2">Descripción:</label>
                     <textarea
-                        className="form-input w-full"
-                        placeholder="Añadir un nuevo comentario..."
-                        value={commentText}
-                        onChange={(e) => setCommentText(e.target.value)}
-                        rows={3}
-                        disabled={loading}
+                        id="description"
+                        value={editedDescription}
+                        onChange={(e) => setEditedDescription(e.target.value)}
+                        className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline h-32"
+                        disabled={!canEditTicket}
                     ></textarea>
-                    <button
-                        type="submit"
-                        className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-md transition-colors duration-200 self-end"
-                        disabled={loading}
-                    >
-                        {loading ? 'Añadiendo...' : 'Añadir Comentario'}
-                    </button>
-                </form>
+                </div>
 
-                <div className="flex justify-end gap-3 mt-6 border-t pt-4">
-                    {isEditing && canEdit ? (
-                        <>
-                            <button
-                                onClick={handleSaveEdits}
-                                className="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-md transition-colors duration-200"
-                                disabled={loading}
-                            >
-                                {loading ? 'Guardando...' : 'Guardar Cambios'}
-                            </button>
-                            <button
-                                onClick={handleCancelEdit}
-                                className="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-4 rounded-md transition-colors duration-200"
-                                disabled={loading}
-                            >
-                                Cancelar
-                            </button>
-                        </>
-                    ) : (
-                        canEdit && ( 
-                            <button
-                                onClick={() => setIsEditing(true)}
-                                className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-md transition-colors duration-200"
-                                disabled={loading}
-                            >
-                                Editar Ticket
-                            </button>
-                        )
-                    )}
+                <div className="flex justify-end gap-3">
                     <button
+                        type="button"
                         onClick={onClose}
-                        className="bg-gray-500 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded-md transition-colors duration-200"
-                        disabled={loading}
+                        className="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-4 rounded-lg shadow-md transition duration-300 ease-in-out focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-opacity-75"
                     >
                         Cerrar
                     </button>
+                    {canEditTicket && (
+                        <button
+                            type="button"
+                            onClick={handleSave}
+                            className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg shadow-md transition duration-300 ease-in-out transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-75"
+                        >
+                            Guardar Cambios
+                        </button>
+                    )}
                 </div>
+
+                <h3 className="text-xl font-bold text-gray-800 mb-4 mt-6 border-t pt-4">Comentarios</h3>
+                <div className="max-h-80 overflow-y-auto border border-gray-200 rounded-md p-4 mb-6 bg-gray-50">
+                    {loadingComments ? (
+                        <p className="text-gray-600">Cargando comentarios...</p>
+                    ) : comments.length > 0 ? (
+                        comments.map((comment: Comment) => (
+                            <div key={comment.id} className="mb-4 pb-2 border-b border-gray-200 last:border-b-0">
+                                <p className="text-sm font-semibold text-gray-700">
+                                    {comment.user_username} <span className="text-gray-500 text-xs">- {new Date(comment.created_at).toLocaleString()}</span>
+                                </p>
+                                <p className="text-gray-800 mt-1 whitespace-pre-wrap">{comment.comment_text}</p>
+                            </div>
+                        ))
+                    ) : (
+                        <p className="text-gray-600">No hay comentarios para este ticket.</p>
+                    )}
+                </div>
+
+                {canAddComment && (
+                    <form onSubmit={handleAddComment} className="mt-4">
+                        <textarea
+                            className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline h-24 mb-4"
+                            placeholder="Añadir un comentario..."
+                            value={newCommentText}
+                            onChange={(e) => setNewCommentText(e.target.value)}
+                            required
+                        ></textarea>
+                        <div className="flex justify-end">
+                            <button
+                                type="submit"
+                                className="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg shadow-md transition duration-300 ease-in-out transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-opacity-75"
+                            >
+                                Añadir Comentario
+                            </button>
+                        </div>
+                    </form>
+                )}
             </div>
-        </Modal>
+        </div>
     );
 };
 

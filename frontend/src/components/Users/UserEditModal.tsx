@@ -1,10 +1,9 @@
 // frontend/src/components/Users/UserEditModal.tsx
 import React, { useState, useEffect, useCallback } from 'react';
-import Modal from '../Common/Modal';
-import api from '../../config/axiosConfig'; // Asegúrate de que esta importación exista y sea correcta
-import { useAuth } from '../../context/AuthContext';
-import { useNotification } from '../../context/NotificationContext'; // <-- AÑADIDO: Importar useNotification
-import { User, Department } from '../../types'; // Importa User y Department desde types.ts
+import Modal from '../Common/Modal'; // Importar el componente Modal genérico
+import api from '../../config/axiosConfig';
+import { useNotification } from '../../context/NotificationContext';
+import { User, Department } from '../../types';
 import { isAxiosErrorTypeGuard, ApiResponseError } from '../../utils/typeGuards';
 
 interface UserEditModalProps {
@@ -12,8 +11,8 @@ interface UserEditModalProps {
     onClose: () => void;
     user: User | null; // El usuario a editar (o null para crear)
     onUserUpdated: () => void; // Callback para notificar al padre que un usuario fue actualizado/creado
-    token: string | null; // Token de autenticación (ya lo tenías como prop, ¡bien!)
-    departments: Department[]; // Lista de departamentos para el selector (ya lo tenías como prop, ¡bien!)
+    token: string | null; // Token de autenticación
+    departments: Department[]; // Lista de departamentos para el selector
 }
 
 const UserEditModal: React.FC<UserEditModalProps> = ({
@@ -21,18 +20,19 @@ const UserEditModal: React.FC<UserEditModalProps> = ({
     onClose,
     user,
     onUserUpdated,
-    token, // Recibiendo el token como prop
-    departments, // Recibiendo los departamentos como prop
+    token,
+    departments,
 }) => {
-    const { addNotification } = useNotification(); // <-- MODIFICADO: Obtener addNotification del contexto de notificaciones
+    const { addNotification } = useNotification();
+
     const [username, setUsername] = useState('');
     const [email, setEmail] = useState('');
-    const [role, setRole] = useState<User['role']>('client'); 
+    const [role, setRole] = useState<User['role']>('client'); // Rol por defecto 'client'
     const [departmentId, setDepartmentId] = useState<number | null>(null);
     const [password, setPassword] = useState('');
     const [loading, setLoading] = useState(false);
-    const [error, setError] = useState<string | null>(null);
 
+    // Resetear el estado del formulario cuando el modal se abre o el usuario a editar cambia
     useEffect(() => {
         if (user) {
             setUsername(user.username);
@@ -43,96 +43,95 @@ const UserEditModal: React.FC<UserEditModalProps> = ({
         } else {
             setUsername('');
             setEmail('');
-            setRole('client'); 
+            setRole('client');
             setDepartmentId(null);
             setPassword('');
         }
-        setError(null); 
-    }, [user]);
+    }, [user, isOpen]); // Añadir isOpen a las dependencias para resetear al abrir
 
     const handleSubmit = useCallback(async (e: React.FormEvent) => {
         e.preventDefault();
         setLoading(true);
-        setError(null);
 
+        // Validación del lado del cliente
         if (!username.trim() || !email.trim() || !role) {
-            setError('Todos los campos obligatorios deben ser completados.');
-            addNotification('Todos los campos obligatorios deben ser completados.', 'error');
+            addNotification('Todos los campos obligatorios deben ser completados.', 'warning');
             setLoading(false);
             return;
         }
 
-        if (!user && !password.trim()) { 
-            setError('La contraseña es obligatoria para nuevos usuarios.');
-            addNotification('La contraseña es obligatoria para nuevos usuarios.', 'error');
+        if (!user && !password.trim()) {
+            addNotification('La contraseña es obligatoria para nuevos usuarios.', 'warning');
             setLoading(false);
             return;
         }
 
-        // CORREGIDO: La validación de departamento solo aplica si el rol NO es 'client'
-        if (role !== 'client' && departmentId === null) { 
-            setError('Los agentes y administradores deben tener un departamento asignado.');
-            addNotification('Los agentes y administradores deben tener un departamento asignado.', 'error');
+        // Validación de departamento para agentes y administradores
+        if (role !== 'client' && departmentId === null) {
+            addNotification('Los agentes y administradores deben tener un departamento asignado.', 'warning');
             setLoading(false);
             return;
         }
 
         try {
-            if (!token) { // Usar el token recibido como prop
-                throw new Error('No autorizado. Token no disponible.');
+            if (!token) {
+                addNotification('No autorizado. Token no disponible.', 'error');
+                setLoading(false);
+                return;
             }
 
             const userData: any = {
-                username,
-                email,
+                username: username.trim(),
+                email: email.trim(),
                 role,
-                department_id: departmentId,
+                department_id: role === 'client' ? null : departmentId, // Enviar null si es cliente
             };
 
-            if (password.trim()) {
-                userData.password = password;
+            if (password.trim()) { // Solo añadir la contraseña si no está vacía
+                userData.password = password.trim();
             }
 
             if (user) {
+                // Actualizar usuario existente
                 await api.put(`/api/users/${user.id}`, userData, {
-                    headers: { Authorization: `Bearer ${token}` }, // Usar el token
+                    headers: { Authorization: `Bearer ${token}` },
                 });
                 addNotification('Usuario actualizado exitosamente.', 'success');
             } else {
+                // Crear nuevo usuario
                 await api.post('/api/users', userData, {
-                    headers: { Authorization: `Bearer ${token}` }, // Usar el token
+                    headers: { Authorization: `Bearer ${token}` },
                 });
                 addNotification('Usuario creado exitosamente.', 'success');
             }
-            onUserUpdated(); 
-            onClose(); 
+            onUserUpdated(); // Notificar al padre que un usuario fue actualizado/creado
+            onClose(); // Cerrar el modal
         } catch (err: unknown) {
             if (isAxiosErrorTypeGuard(err)) {
                 const apiError = err.response?.data as ApiResponseError;
-                setError(apiError?.message || 'Error al guardar usuario.');
                 addNotification(`Error al guardar usuario: ${apiError?.message || 'Error desconocido'}`, 'error');
             } else {
-                setError('Ocurrió un error inesperado al guardar el usuario.');
+                addNotification('Ocurrió un error inesperado al guardar el usuario.', 'error');
             }
             console.error('Error saving user:', err);
         } finally {
             setLoading(false);
         }
-    }, [username, email, role, departmentId, password, user, token, addNotification, onUserUpdated, onClose]); // Añadir 'token' y 'onClose' a las dependencias
+    }, [username, email, role, departmentId, password, user, token, addNotification, onUserUpdated, onClose]);
 
     const modalTitle = user ? `Editar Usuario: ${user.username}` : 'Crear Nuevo Usuario';
 
     return (
         <Modal isOpen={isOpen} onClose={onClose} title={modalTitle}>
-            <form onSubmit={handleSubmit} className="p-4"> {/* Añadido clase p-4 para padding */}
-                {error && <div className="error-message text-center p-3 mb-4">{error}</div>}
-
-                <div className="form-group mb-4">
-                    <label htmlFor="username" className="block text-gray-700 text-sm font-bold mb-2">Nombre de Usuario:</label> {/* Tailwind classes */}
+            <form onSubmit={handleSubmit} className="p-4 space-y-4"> {/* Añadido padding y espacio entre elementos */}
+                {/* El mensaje de error local se elimina, las notificaciones se muestran con addNotification */}
+                
+                <div>
+                    <label htmlFor="username" className="block text-gray-700 text-sm font-bold mb-2">Nombre de Usuario:</label>
                     <input
                         type="text"
                         id="username"
-                        className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" /* Tailwind classes */
+                        className="shadow appearance-none border rounded-md w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                         value={username}
                         onChange={(e) => setUsername(e.target.value)}
                         disabled={loading}
@@ -140,12 +139,12 @@ const UserEditModal: React.FC<UserEditModalProps> = ({
                     />
                 </div>
 
-                <div className="form-group mb-4">
-                    <label htmlFor="email" className="block text-gray-700 text-sm font-bold mb-2">Email:</label> {/* Tailwind classes */}
+                <div>
+                    <label htmlFor="email" className="block text-gray-700 text-sm font-bold mb-2">Email:</label>
                     <input
                         type="email"
                         id="email"
-                        className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" /* Tailwind classes */
+                        className="shadow appearance-none border rounded-md w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                         value={email}
                         onChange={(e) => setEmail(e.target.value)}
                         disabled={loading}
@@ -153,13 +152,13 @@ const UserEditModal: React.FC<UserEditModalProps> = ({
                     />
                 </div>
 
-                <div className="form-group mb-4">
-                    <label htmlFor="role" className="block text-gray-700 text-sm font-bold mb-2">Rol:</label> {/* Tailwind classes */}
+                <div>
+                    <label htmlFor="role" className="block text-gray-700 text-sm font-bold mb-2">Rol:</label>
                     <select
                         id="role"
-                        className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" /* Tailwind classes */
+                        className="shadow appearance-none border rounded-md w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                         value={role}
-                        onChange={(e) => setRole(e.target.value as User['role'])} 
+                        onChange={(e) => setRole(e.target.value as User['role'])}
                         disabled={loading}
                         required
                     >
@@ -169,14 +168,14 @@ const UserEditModal: React.FC<UserEditModalProps> = ({
                     </select>
                 </div>
 
-                <div className="form-group mb-4">
-                    <label htmlFor="department" className="block text-gray-700 text-sm font-bold mb-2">Departamento:</label> {/* Tailwind classes */}
+                <div>
+                    <label htmlFor="department" className="block text-gray-700 text-sm font-bold mb-2">Departamento:</label>
                     <select
                         id="department"
-                        className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" /* Tailwind classes */
-                        value={departmentId || ''}
+                        className="shadow appearance-none border rounded-md w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        value={departmentId || ''} // Usar '' para la opción "Seleccionar Departamento"
                         onChange={(e) => setDepartmentId(e.target.value ? parseInt(e.target.value) : null)}
-                        disabled={loading || role === 'client'} 
+                        disabled={loading || role === 'client'} // Deshabilitar si es cliente
                     >
                         <option value="">Seleccionar Departamento</option>
                         {departments.map((dept) => (
@@ -188,35 +187,35 @@ const UserEditModal: React.FC<UserEditModalProps> = ({
                     )}
                 </div>
 
-                <div className="form-group mb-4">
-                    <label htmlFor="password" className="block text-gray-700 text-sm font-bold mb-2">Contraseña {user ? '(dejar vacío para no cambiar)' : '*'}:</label> {/* Tailwind classes */}
+                <div>
+                    <label htmlFor="password" className="block text-gray-700 text-sm font-bold mb-2">Contraseña {user ? '(dejar vacío para no cambiar)' : '*'}:</label>
                     <input
                         type="password"
                         id="password"
-                        className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" /* Tailwind classes */
+                        className="shadow appearance-none border rounded-md w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                         value={password}
                         onChange={(e) => setPassword(e.target.value)}
                         disabled={loading}
                         autoComplete="new-password"
-                        required={!user} 
+                        required={!user} // Requerir contraseña solo para nuevos usuarios
                     />
                 </div>
 
                 <div className="flex justify-end gap-2 mt-6">
                     <button
-                        type="submit"
-                        className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-md transition-colors duration-200"
-                        disabled={loading}
-                    >
-                        {loading ? 'Guardando...' : 'Guardar'}
-                    </button>
-                    <button
                         type="button"
                         onClick={onClose}
-                        className="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-4 rounded-md transition-colors duration-200"
+                        className="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-4 rounded-md transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500"
                         disabled={loading}
                     >
                         Cancelar
+                    </button>
+                    <button
+                        type="submit"
+                        className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-md transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+                        disabled={loading}
+                    >
+                        {loading ? 'Guardando...' : 'Guardar'}
                     </button>
                 </div>
             </form>

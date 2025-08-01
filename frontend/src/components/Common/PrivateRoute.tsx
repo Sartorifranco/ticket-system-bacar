@@ -1,49 +1,29 @@
 // frontend/src/components/Common/PrivateRoute.tsx
-import React, { ReactNode } from 'react'; // Importa ReactNode
-import { Navigate } from 'react-router-dom';
-import { useAuth } from '../../context/AuthContext';
-import Layout from '../Layout/Layout'; // Importa el Layout
+import React from 'react';
+import { Navigate, Outlet } from 'react-router-dom';
+import { useAuth } from '../../context/AuthContext'; // Ajusta la ruta si es necesario
+import { UserRole } from '../../types'; // Importa UserRole
 
+// Define las props que PrivateRoute espera
 interface PrivateRouteProps {
-    children: ReactNode; // Define que el componente PrivateRoute acepta children de tipo ReactNode
-    requiredRoles: string[];
+    roles: UserRole[]; // Añade esta línea
 }
 
-const PrivateRoute: React.FC<PrivateRouteProps> = ({ children, requiredRoles }) => {
-    const { user, authLoading } = useAuth(); // <-- MODIFICADO: 'loading' cambiado a 'authLoading'
+const PrivateRoute: React.FC<PrivateRouteProps> = ({ roles }) => {
+    const { user, loading } = useAuth();
 
-    if (authLoading) { // <-- MODIFICADO: Usar 'authLoading'
+    if (loading) {
         // Podrías mostrar un spinner de carga aquí
-        return (
-            <Layout>
-                <div className="flex justify-center items-center min-h-screen bg-gray-100 text-gray-700">
-                    <p>Cargando autenticación...</p>
-                </div>
-            </Layout>
-        );
+        return <div className="flex justify-center items-center h-screen text-lg">Cargando autenticación...</div>;
     }
 
-    // Si no hay usuario logueado, redirigir a la página de login
-    if (!user) {
+    // Si no hay usuario o el rol no está permitido, redirigir al login
+    if (!user || !roles.includes(user.role)) {
         return <Navigate to="/login" replace />;
     }
 
-    // Si el usuario no tiene ninguno de los roles requeridos, redirigir a un dashboard por defecto o a una página de acceso denegado
-    if (!requiredRoles.includes(user.role)) {
-        // Dependiendo de tu lógica, podrías redirigir a diferentes dashboards
-        if (user.role === 'client') {
-            return <Navigate to="/client-dashboard" replace />;
-        } else if (user.role === 'agent') {
-            return <Navigate to="/agent-dashboard" replace />;
-        } else if (user.role === 'admin') {
-            return <Navigate to="/admin-dashboard" replace />;
-        }
-        // Fallback si el rol no coincide con ninguna ruta conocida
-        return <Navigate to="/login" replace />; 
-    }
-
-    // Si el usuario está logueado y tiene el rol requerido, renderizar los children
-    return <>{children}</>;
+    // Si el usuario está autenticado y tiene el rol permitido, renderizar el contenido anidado
+    return <Outlet />;
 };
 
 export default PrivateRoute;

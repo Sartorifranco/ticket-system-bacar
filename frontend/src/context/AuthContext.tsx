@@ -1,139 +1,178 @@
 // frontend/src/context/AuthContext.tsx
-import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
+import React, { createContext, useState, useContext, useEffect, useCallback, ReactNode } from 'react';
 import api from '../config/axiosConfig';
-import { User } from '../types';
+import { User, ApiResponseError } from '../types'; // Mantenemos User y ApiResponseError
+import { isAxiosErrorTypeGuard } from '../utils/typeGuards';
 
-// Definir la interfaz para el estado de autenticación
-interface AuthState {
+// Definiciones de tipos para LoginData y RegisterData
+// Si estas interfaces existen y son más complejas en types.ts,
+// asegúrate de que se exporten desde allí y luego puedes eliminar estas definiciones locales.
+interface LoginData {
+    email: string;
+    password: string;
+}
+
+interface RegisterData {
+    username: string;
+    email: string;
+    password: string;
+    role: 'client' | 'agent' | 'admin';
+    department_id?: number | null;
+}
+
+interface AuthContextType {
     user: User | null;
     token: string | null;
     isAuthenticated: boolean;
-    authLoading: boolean;
+    loading: boolean; // Cambiado de 'authLoading' a 'loading'
+    error: string | null;
+    login: (credentials: LoginData) => Promise<boolean>; // Cambiado de 'signIn' a 'login'
+    register: (userData: RegisterData) => Promise<boolean>;
+    logout: () => void; // Cambiado de 'signOut' a 'logout'
+    clearError: () => void;
+    updateUserContext: (updatedUserData: Partial<User>) => void;
 }
 
-// Definir la interfaz para el contexto de autenticación
-interface AuthContextType extends AuthState {
-    signIn: (token: string, user: User) => void;
-    signOut: () => void;
-    updateUser: (updatedUserData: Partial<User>) => void;
-    fetchUnreadNotificationsCount: () => Promise<void>; 
-    unreadNotificationsCount: number;
-}
-
-// Crear el contexto de autenticación
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-// Proveedor de autenticación
 export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-    const [state, setState] = useState<AuthState>({
-        user: null,
-        token: localStorage.getItem('token'), 
-        isAuthenticated: !!localStorage.getItem('token'),
-        authLoading: true, // Iniciar en true para la carga inicial
-    });
-    const [unreadNotificationsCount, setUnreadNotificationsCount] = useState<number>(0);
+    const [user, setUser] = useState<User | null>(null);
+    const [token, setToken] = useState<string | null>(localStorage.getItem('token'));
+    const [isAuthenticated, setIsAuthenticated] = useState<boolean>(!!token);
+    const [loading, setLoading] = useState<boolean>(true);
+    const [error, setError] = useState<string | null>(null);
 
-    // Efecto para la carga inicial y revalidación del token
-    useEffect(() => {
-        const storedToken = localStorage.getItem('token');
-        const storedUser = localStorage.getItem('user'); // Recuperar la cadena del usuario
-
-        // Verificar explícitamente que storedUser no sea null ni una cadena vacía
-        if (storedToken && storedUser && storedUser !== 'undefined' && storedUser !== 'null') { 
-            try {
-                const parsedUser: User = JSON.parse(storedUser); // Intentar parsear
-                setState(prevState => ({
-                    ...prevState,
-                    user: parsedUser,
-                    isAuthenticated: true,
-                    token: storedToken,
-                    authLoading: false,
-                }));
-            } catch (e) {
-                console.error("Error parsing user from localStorage:", e);
-                // Si hay un error al parsear, limpiar localStorage para evitar bucles
-                localStorage.removeItem('token');
-                localStorage.removeItem('user');
-                setState({ user: null, token: null, isAuthenticated: false, authLoading: false });
-            }
-        } else {
-            // Si no hay token, o no hay usuario válido en localStorage, no estamos autenticados
-            // y terminamos la carga.
-            localStorage.removeItem('token'); // Asegurarse de que no haya un token "huérfano"
-            localStorage.removeItem('user'); // Asegurarse de que no haya un usuario "huérfano"
-            setState(prevState => ({ ...prevState, authLoading: false }));
-        }
-    }, []); // Dependencias vacías para que se ejecute solo una vez al montar
-
-    // Función para manejar el login (renombrada a signIn)
-    const signIn = useCallback((token: string, user: User) => {
-        localStorage.setItem('token', token);
-        localStorage.setItem('user', JSON.stringify(user)); // Guardar el objeto user completo
-        setState({ user, token, isAuthenticated: true, authLoading: false });
-    }, []);
-
-    // Función para manejar el logout (renombrada a signOut)
-    const signOut = useCallback(() => {
-        localStorage.removeItem('token');
-        localStorage.removeItem('user'); // Eliminar el objeto user
-        setState({ user: null, token: null, isAuthenticated: false, authLoading: false });
-    }, []);
-
-    // Función para actualizar los datos del usuario en el estado del contexto
-    const updateUser = useCallback((updatedUserData: Partial<User>) => {
-        setState(prevState => {
-            const updatedUser = prevState.user ? { ...prevState.user, ...updatedUserData } : null;
-            if (updatedUser) {
-                localStorage.setItem('user', JSON.stringify(updatedUser)); // Actualizar en localStorage
-            }
-            return {
-                ...prevState,
-                user: updatedUser,
-            };
-        });
-    }, []);
-
-    // Función para obtener el conteo de notificaciones no leídas
-    const fetchUnreadNotificationsCount = useCallback(async () => {
-        if (!state.token || !state.user) {
-            setUnreadNotificationsCount(0);
-            return;
-        }
+    const fetchUserData = useCallback(async (authToken: string) => {
         try {
-            const response = await api.get<{ count: number }>('/api/notifications/unread-count', {
-                headers: { Authorization: `Bearer ${state.token}` },
+            const response = await api.get('/api/auth/me', {
+                headers: { Authorization: `Bearer ${authToken}` },
             });
-            setUnreadNotificationsCount(response.data.count);
-        } catch (error) {
-            console.error('Error fetching unread notifications count:', error);
-            setUnreadNotificationsCount(0);
+            setUser(response.data);
+            setIsAuthenticated(true);
+            setError(null);
+            return true;
+        } catch (err: unknown) {
+            console.error('Failed to fetch user data:', err);
+            if (isAxiosErrorTypeGuard(err) && err.response?.status === 401) {
+                localStorage.removeItem('token');
+                setToken(null);
+                setUser(null);
+                setIsAuthenticated(false);
+                setError('Tu sesión ha expirado o no es válida. Por favor, inicia sesión de nuevo.');
+            } else if (isAxiosErrorTypeGuard(err)) {
+                const apiError = err.response?.data as ApiResponseError;
+                setError(apiError?.message || 'Error al obtener datos del usuario.');
+            } else {
+                setError('Ocurrió un error inesperado al obtener los datos del usuario.');
+            }
+            return false;
         }
-    }, [state.token, state.user]); 
+    }, []);
 
-    // Efecto para cargar el conteo de notificaciones no leídas cuando el usuario o el token cambian
     useEffect(() => {
-        if (state.isAuthenticated && state.token && state.user) {
-            fetchUnreadNotificationsCount();
+        const checkAuth = async () => {
+            if (token) {
+                await fetchUserData(token);
+            }
+            setLoading(false);
+        };
+        checkAuth();
+    }, [token, fetchUserData]);
+
+    const login = useCallback(async (credentials: LoginData) => { // Cambiado de signIn a login
+        setLoading(true);
+        setError(null);
+        try {
+            const response = await api.post('/api/auth/login', credentials);
+            const { token: newToken, ...userData } = response.data;
+            localStorage.setItem('token', newToken);
+            setToken(newToken);
+            setUser(userData);
+            setIsAuthenticated(true);
+            setLoading(false);
+            return true;
+        } catch (err: unknown) {
+            setLoading(false);
+            if (isAxiosErrorTypeGuard(err)) {
+                const apiError = err.response?.data as ApiResponseError;
+                setError(apiError?.message || 'Error de inicio de sesión.');
+            } else {
+                setError('Ocurrió un error inesperado durante el inicio de sesión.');
+            }
+            return false;
         }
-    }, [state.isAuthenticated, state.token, state.user, fetchUnreadNotificationsCount]); 
+    }, []);
+
+    const register = useCallback(async (userData: RegisterData) => {
+        setLoading(true);
+        setError(null);
+        try {
+            const response = await api.post('/api/auth/register', userData);
+            const { token: newToken, ...newUserData } = response.data;
+            localStorage.setItem('token', newToken);
+            setToken(newToken);
+            setUser(newUserData);
+            setIsAuthenticated(true);
+            setLoading(false);
+            return true;
+        } catch (err: unknown) {
+            setLoading(false);
+            if (isAxiosErrorTypeGuard(err)) {
+                const apiError = err.response?.data as ApiResponseError;
+                setError(apiError?.message || 'Error de registro.');
+            } else {
+                setError('Ocurrió un error inesperado durante el registro.');
+            }
+            return false;
+        }
+    }, []);
+
+    const logout = useCallback(() => { // Cambiado de signOut a logout
+        localStorage.removeItem('token');
+        setToken(null);
+        setUser(null);
+        setIsAuthenticated(false);
+        setError(null);
+        setLoading(false);
+    }, []);
+
+    const clearError = useCallback(() => {
+        setError(null);
+    }, []);
+
+    const updateUserContext = useCallback((updatedUserData: Partial<User>) => {
+        setUser(prevUser => prevUser ? { ...prevUser, ...updatedUserData } : null);
+    }, []);
+
+
+    const value = {
+        user,
+        token,
+        isAuthenticated,
+        loading,
+        error,
+        login,
+        register,
+        logout,
+        clearError,
+        updateUserContext
+    };
+
+    if (loading) {
+        return (
+            <div className="flex items-center justify-center min-h-screen bg-gray-100">
+                <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-gray-900"></div>
+            </div>
+        );
+    }
 
     return (
-        <AuthContext.Provider 
-            value={{ 
-                ...state, 
-                signIn, 
-                signOut, 
-                updateUser, 
-                fetchUnreadNotificationsCount, 
-                unreadNotificationsCount,
-            }}
-        >
+        <AuthContext.Provider value={value}>
             {children}
         </AuthContext.Provider>
     );
 };
 
-// Hook personalizado para usar el contexto de autenticación
 export const useAuth = () => {
     const context = useContext(AuthContext);
     if (context === undefined) {

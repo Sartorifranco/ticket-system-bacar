@@ -61,7 +61,7 @@ const TicketDetailForm: React.FC<TicketDetailFormProps> = ({ ticket, onSave, onC
 
     const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
         const { name, value } = e.target;
-        setFormData((prev) => ({
+        setFormData((prev: any) => ({
             ...prev,
             [name]: name === 'department_id' || name === 'assigned_to_user_id' ? (value === '' ? null : parseInt(value)) : value,
         }));

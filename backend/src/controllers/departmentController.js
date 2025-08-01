@@ -1,197 +1,217 @@
 // backend/src/controllers/departmentController.js
-const asyncHandler = require('express-async-handler');
 const pool = require('../config/db');
-const { logActivity } = require('../utils/activityLogger'); // Asegúrate de que esta utilidad exista
+const asyncHandler = require('express-async-handler'); // Usar express-async-handler
+const { logActivity } = require('../services/activityLogService');
 
-// @desc    Obtener todos los departamentos
+// @desc    Get all departments
 // @route   GET /api/departments
-// @access  Private (Admin, Agent, Client)
+// @access  Admin, Agent, Client
 const getAllDepartments = asyncHandler(async (req, res) => {
-    console.log('[DepartmentController] Obteniendo todos los departamentos...');
-    const [departments] = await pool.query('SELECT id, name, description, created_at, updated_at FROM departments ORDER BY name ASC');
-    console.log('[DepartmentController] Departamentos obtenidos:', departments.length);
-    res.status(200).json({ departments });
+    console.log('[DepartmentController] Iniciando obtención de todos los departamentos...');
+    try {
+        const [departments] = await pool.execute('SELECT id, name, description, created_at, updated_at FROM departments ORDER BY name ASC');
+        console.log(`[DepartmentController] Departamentos obtenidos: ${departments.length} resultados.`);
+        res.status(200).json({
+            success: true,
+            count: departments.length,
+            data: departments,
+        });
+    } catch (error) {
+        console.error('[DepartmentController Error] Error al obtener departamentos:', error.message, error.stack);
+        res.status(500);
+        throw new Error('Error del servidor al obtener departamentos');
+    }
 });
 
-// @desc    Obtener un departamento por ID
+// @desc    Get single department by ID
 // @route   GET /api/departments/:id
-// @access  Private (Admin, Agent, Client)
+// @access  Admin, Agent
 const getDepartmentById = asyncHandler(async (req, res) => {
     const { id } = req.params;
-    console.log(`[DepartmentController] Obteniendo departamento por ID: ${id}`);
-    const [departmentRows] = await pool.query('SELECT id, name, description, created_at, updated_at FROM departments WHERE id = ?', [id]);
-    const department = departmentRows[0];
-
-    if (!department) {
-        res.status(404);
-        throw new Error('Departamento no encontrado');
+    console.log(`[DepartmentController] Iniciando obtención de departamento por ID: ${id}...`);
+    try {
+        const [rows] = await pool.execute('SELECT id, name, description, created_at, updated_at FROM departments WHERE id = ?', [id]);
+        if (rows.length === 0) {
+            res.status(404);
+            throw new Error('Departamento no encontrado');
+        }
+        console(`[DepartmentController] Departamento ${id} obtenido.`);
+        res.status(200).json({
+            success: true,
+            data: rows[0],
+        });
+    } catch (error) {
+        console.error(`[DepartmentController Error] Error al obtener departamento ${id}:`, error.message, error.stack);
+        res.status(500);
+        throw new Error('Error del servidor al obtener departamento');
     }
-    console.log(`[DepartmentController] Departamento ${id} obtenido.`);
-    res.status(200).json(department);
 });
 
-// @desc    Crear un nuevo departamento
+// @desc    Create new department
 // @route   POST /api/departments
-// @access  Private (Admin only)
+// @access  Admin
 const createDepartment = asyncHandler(async (req, res) => {
     const { name, description } = req.body;
+    const userId = req.user.id;
+    const username = req.user.username;
+    const userRole = req.user.role;
 
-    if (!name) {
+    if (!name || !description) {
         res.status(400);
-        throw new Error('Por favor, introduce el nombre del departamento.');
+        throw new Error('Por favor, ingrese el nombre y la descripción del departamento.');
     }
 
-    // Verificar si ya existe un departamento con el mismo nombre
-    const [existingDept] = await pool.query('SELECT id FROM departments WHERE name = ?', [name]);
-    if (existingDept.length > 0) {
-        res.status(400);
-        throw new Error('Ya existe un departamento con ese nombre.');
+    console.log(`[DepartmentController] Intentando crear departamento: ${name}`);
+    try {
+        const [result] = await pool.execute(
+            'INSERT INTO departments (name, description) VALUES (?, ?)',
+            [name, description]
+        );
+
+        const newDepartmentId = result.insertId;
+
+        await logActivity(
+            userId,
+            username,
+            userRole,
+            'department_created',
+            `Departamento "${name}" (ID: ${newDepartmentId}) creado por ${username}.`,
+            'department',
+            newDepartmentId,
+            null,
+            { name, description }
+        );
+
+        res.status(201).json({
+            success: true,
+            message: 'Departamento creado exitosamente',
+            departmentId: newDepartmentId,
+        });
+    } catch (error) {
+        console.error('[DepartmentController Error] Error al crear departamento:', error.message, error.stack);
+        if (error.code === 'ER_DUP_ENTRY') {
+            res.status(409);
+            throw new Error('Ya existe un departamento con ese nombre.');
+        }
+        res.status(500);
+        throw new Error('Error del servidor al crear departamento');
     }
-
-    console.log(`[DepartmentController] Creando nuevo departamento: ${name}`);
-    const [result] = await pool.query(
-        'INSERT INTO departments (name, description) VALUES (?, ?)',
-        [name, description || null]
-    );
-
-    const newDepartmentId = result.insertId;
-    const [newDepartmentRows] = await pool.query('SELECT id, name, description, created_at, updated_at FROM departments WHERE id = ?', [newDepartmentId]);
-    const newDepartment = newDepartmentRows[0];
-
-    await logActivity(
-        req.user.id,
-        req.user.username,
-        req.user.role,
-        'department_created',
-        `creó el departamento '${name}' (ID: ${newDepartmentId})`,
-        'department',
-        newDepartmentId,
-        null,
-        { name, description }
-    );
-    console.log(`[DepartmentController] Departamento '${name}' creado exitosamente.`);
-    res.status(201).json(newDepartment);
 });
 
-// @desc    Actualizar un departamento
+// @desc    Update department
 // @route   PUT /api/departments/:id
-// @access  Private (Admin only)
+// @access  Admin
 const updateDepartment = asyncHandler(async (req, res) => {
     const { id } = req.params;
     const { name, description } = req.body;
+    const userId = req.user.id;
+    const username = req.user.username;
+    const userRole = req.user.role;
 
-    console.log(`[DepartmentController] Actualizando departamento ID: ${id}`);
-    const [existingDeptRows] = await pool.query('SELECT id, name, description FROM departments WHERE id = ?', [id]);
-    const existingDepartment = existingDeptRows[0];
-
-    if (!existingDepartment) {
-        res.status(404);
-        throw new Error('Departamento no encontrado');
-    }
-
-    if (!name) {
+    if (!name || !description) {
         res.status(400);
-        throw new new Error('El nombre del departamento no puede estar vacío.');
+        throw new Error('Por favor, ingrese el nombre y la descripción del departamento.');
     }
 
-    // Verificar si el nuevo nombre ya existe en otro departamento
-    const [duplicateName] = await pool.query('SELECT id FROM departments WHERE name = ? AND id != ?', [name, id]);
-    if (duplicateName.length > 0) {
-        res.status(400);
-        throw new Error('Ya existe otro departamento con ese nombre.');
+    console.log(`[DepartmentController] Intentando actualizar departamento ID: ${id}`);
+    try {
+        const [existingDeptRows] = await pool.execute('SELECT * FROM departments WHERE id = ?', [id]);
+        if (existingDeptRows.length === 0) {
+            res.status(404);
+            throw new Error('Departamento no encontrado');
+        }
+        const oldDepartmentData = existingDeptRows[0];
+
+        await pool.execute(
+            'UPDATE departments SET name = ?, description = ? WHERE id = ?',
+            [name, description, id]
+        );
+
+        const [updatedDeptRows] = await pool.execute('SELECT * FROM departments WHERE id = ?', [id]);
+        const newDepartmentData = updatedDeptRows[0];
+
+        await logActivity(
+            userId,
+            username,
+            userRole,
+            'department_updated',
+            `Departamento "${oldDepartmentData.name}" (ID: ${id}) actualizado por ${username}.`,
+            'department',
+            parseInt(id),
+            oldDepartmentData,
+            newDepartmentData
+        );
+
+        res.status(200).json({
+            success: true,
+            message: 'Departamento actualizado exitosamente.',
+        });
+    } catch (error) {
+        console.error(`[DepartmentController Error] Error al actualizar departamento ${id}:`, error.message, error.stack);
+        if (error.code === 'ER_DUP_ENTRY') {
+            res.status(409);
+            throw new Error('Ya existe un departamento con ese nombre.');
+        }
+        res.status(500);
+        throw new Error('Error del servidor al actualizar departamento');
     }
-
-    const updateFields = [];
-    const updateValues = [];
-    const changes = {};
-
-    if (name !== existingDepartment.name) {
-        updateFields.push('name = ?');
-        updateValues.push(name);
-        changes.name = { old: existingDepartment.name, new: name };
-    }
-    if (description !== undefined && description !== existingDepartment.description) {
-        updateFields.push('description = ?');
-        updateValues.push(description);
-        changes.description = { old: existingDepartment.description, new: description };
-    }
-
-    if (updateFields.length === 0) {
-        console.log('[DepartmentController] No se detectaron cambios para actualizar.');
-        return res.status(200).json(existingDepartment);
-    }
-
-    const query = `UPDATE departments SET ${updateFields.join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`;
-    updateValues.push(id);
-
-    await pool.query(query, updateValues);
-
-    const [updatedDeptRows] = await pool.query('SELECT id, name, description, created_at, updated_at FROM departments WHERE id = ?', [id]);
-    const updatedDepartment = updatedDeptRows[0];
-
-    await logActivity(
-        req.user.id,
-        req.user.username,
-        req.user.role,
-        'department_updated',
-        `actualizó el departamento '${existingDepartment.name}' (ID: ${id})`,
-        'department',
-        parseInt(id),
-        existingDepartment,
-        updatedDepartment
-    );
-    console.log(`[DepartmentController] Departamento ${id} actualizado exitosamente.`);
-    res.status(200).json(updatedDepartment);
 });
 
-// @desc    Eliminar un departamento
+// @desc    Delete department
 // @route   DELETE /api/departments/:id
-// @access  Private (Admin only)
+// @access  Admin
 const deleteDepartment = asyncHandler(async (req, res) => {
     const { id } = req.params;
+    const userId = req.user.id;
+    const username = req.user.username;
+    const userRole = req.user.role;
 
-    console.log(`[DepartmentController] Eliminando departamento ID: ${id}`);
-    const [departmentRows] = await pool.query('SELECT id, name FROM departments WHERE id = ?', [id]);
-    const departmentToDelete = departmentRows[0];
+    console.log(`[DepartmentController] Intentando eliminar departamento ID: ${id}`);
+    try {
+        const [existingDeptRows] = await pool.execute('SELECT * FROM departments WHERE id = ?', [id]);
+        if (existingDeptRows.length === 0) {
+            res.status(404);
+            throw new Error('Departamento no encontrado');
+        }
+        const deletedDepartmentData = existingDeptRows[0];
 
-    if (!departmentToDelete) {
-        res.status(404);
-        throw new Error('Departamento no encontrado');
+        // Check if there are any tickets associated with this department
+        const [ticketCountRows] = await pool.execute('SELECT COUNT(*) AS count FROM tickets WHERE department_id = ?', [id]);
+        if (ticketCountRows[0].count > 0) {
+            res.status(400);
+            throw new Error('No se puede eliminar el departamento porque tiene tickets asociados.');
+        }
+
+        await pool.execute('DELETE FROM departments WHERE id = ?', [id]);
+
+        await logActivity(
+            userId,
+            username,
+            userRole,
+            'department_deleted',
+            `Departamento "${deletedDepartmentData.name}" (ID: ${id}) eliminado por ${username}.`,
+            'department',
+            parseInt(id),
+            deletedDepartmentData,
+            null
+        );
+
+        res.status(200).json({
+            success: true,
+            message: 'Departamento eliminado exitosamente.',
+        });
+    } catch (error) {
+        console.error(`[DepartmentController Error] Error al eliminar departamento ${id}:`, error.message, error.stack);
+        res.status(500);
+        throw new Error(error.message || 'Error del servidor al eliminar departamento');
     }
-
-    // Opcional: Verificar si hay tickets asociados a este departamento
-    // Si hay tickets, podrías:
-    // 1. Impedir la eliminación y pedir que los tickets sean reasignados.
-    // 2. Reasignar los tickets a un departamento por defecto o a NULL.
-    // Por ahora, asumimos que la base de datos maneja la restricción de clave foránea (ON DELETE SET NULL o RESTRICT)
-    // o que no hay tickets asociados.
-
-    const [result] = await pool.query('DELETE FROM departments WHERE id = ?', [id]);
-
-    if (result.affectedRows === 0) {
-        res.status(404);
-        throw new Error('Departamento no encontrado');
-    }
-
-    await logActivity(
-        req.user.id,
-        req.user.username,
-        req.user.role,
-        'department_deleted',
-        `eliminó el departamento '${departmentToDelete.name}' (ID: ${id})`,
-        'department',
-        parseInt(id),
-        departmentToDelete,
-        null
-    );
-    console.log(`[DepartmentController] Departamento ${id} eliminado exitosamente.`);
-    res.status(200).json({ message: 'Departamento eliminado exitosamente.' });
 });
 
+// Export all functions
 module.exports = {
     getAllDepartments,
     getDepartmentById,
     createDepartment,
     updateDepartment,
-    deleteDepartment
+    deleteDepartment,
 };

@@ -1,366 +1,288 @@
-// frontend/src/components/Tickets/Tickets.tsx
+// src/components/Tickets/Tickets.tsx
 import React, { useState, useEffect, useCallback } from 'react';
 import api from '../../config/axiosConfig';
 import { useAuth } from '../../context/AuthContext';
 import { useNotification } from '../../context/NotificationContext';
-import { TicketData, Department, User, TicketStatus, TicketPriority } from '../../types';
-import { isAxiosErrorTypeGuard, ApiResponseError } from '../../utils/typeGuards';
-import TicketDetailModal from './TicketDetailModal'; // Importar el modal de detalle
-import CreateTicketModal from './CreateTicketModal'; // Importar el modal de creación
-import { ticketStatusTranslations, ticketPriorityTranslations } from '../../utils/traslations';
-import { Link } from 'react-router-dom'; // Para el enlace a detalles del ticket
+import { TicketData, Department, User, ApiResponseError } from '../../types';
+import { isAxiosErrorTypeGuard } from '../../utils/typeGuards';
 
 interface TicketsProps {
-    // Estas props son opcionales si el componente Tickets maneja su propia lógica de edición/creación
-    // Si AdminDashboard necesita controlar los modales, estas props serían útiles.
-    // Por simplicidad, este componente manejará sus propios modales de detalle y creación.
-    // onEditTicket?: (ticket: TicketData | null) => void; // Si se necesita un modal de edición externo
-    // onCreateTicket?: () => void; // Si se necesita un modal de creación externo
-    // allDepartments: Department[]; // Necesario para los selectores en modales
-    // allUsers: User[]; // Necesario para los selectores en modales
+    onEditTicket: (ticket: TicketData | null) => void;
+    onCreateTicket: () => void;
+    departments: Department[];
+    users: User[];
 }
 
-const Tickets: React.FC<TicketsProps> = () => {
-    const { token, signOut } = useAuth();
+const Tickets: React.FC<TicketsProps> = ({ onEditTicket, onCreateTicket, departments, users }) => {
+    const { user, token, logout } = useAuth(); // CAMBIADO: signOut a logout. 'logout' se usa en el Layout, aquí no es estrictamente necesario desestructurarlo si no se usa directamente en este componente.
     const { addNotification } = useNotification();
 
     const [tickets, setTickets] = useState<TicketData[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
+    const [statusFilter, setStatusFilter] = useState<string>('');
+    const [priorityFilter, setPriorityFilter] = useState<string>('');
+    const [departmentFilter, setDepartmentFilter] = useState<string>('');
+    const [assignedToFilter, setAssignedToFilter] = useState<string>('');
+    const [createdByFilter, setCreatedByFilter] = useState<string>('');
 
-    // Estados para modales de ticket
-    const [isTicketDetailModalOpen, setIsTicketDetailModalOpen] = useState(false);
-    const [selectedTicket, setSelectedTicket] = useState<TicketData | null>(null);
-    const [isCreateTicketModalOpen, setIsCreateTicketModalOpen] = useState(false);
-
-    // Estados para filtros
-    const [filterStatus, setFilterStatus] = useState<string>('all');
-    const [filterPriority, setFilterPriority] = useState<string>('all');
-    const [filterDepartment, setFilterDepartment] = useState<string>('all');
-    const [filterAgent, setFilterAgent] = useState<string>('all');
-    const [searchTerm, setSearchTerm] = useState<string>('');
-
-    // Estados para listas de departamentos y usuarios (para filtros y modales)
-    const [allDepartments, setAllDepartments] = useState<Department[]>([]);
-    const [allUsers, setAllUsers] = useState<User[]>([]);
-
-    // Función para obtener todos los tickets
     const fetchTickets = useCallback(async () => {
         setLoading(true);
         setError(null);
         try {
-            if (!token) {
-                throw new Error('No autorizado. Token no disponible.');
-            }
-
             const queryParams = new URLSearchParams();
-            if (filterStatus !== 'all') queryParams.append('status', filterStatus);
-            if (filterPriority !== 'all') queryParams.append('priority', filterPriority);
-            if (filterDepartment !== 'all') queryParams.append('department_id', filterDepartment);
-            if (filterAgent !== 'all') queryParams.append('agent_id', filterAgent); // El backend espera agent_id en los filtros
-            if (searchTerm) queryParams.append('search', searchTerm);
+            if (statusFilter) queryParams.append('status', statusFilter);
+            if (priorityFilter) queryParams.append('priority', priorityFilter);
+            if (departmentFilter) queryParams.append('department_id', departmentFilter);
+            if (assignedToFilter) queryParams.append('assigned_to_user_id', assignedToFilter);
+            if (createdByFilter) queryParams.append('created_by_user_id', createdByFilter);
 
             const response = await api.get(`/api/tickets?${queryParams.toString()}`, {
                 headers: { Authorization: `Bearer ${token}` },
             });
-            setTickets(response.data.tickets || []);
+            setTickets(response.data.tickets);
         } catch (err: unknown) {
+            console.error('Error fetching tickets:', err);
             if (isAxiosErrorTypeGuard(err)) {
                 const apiError = err.response?.data as ApiResponseError;
-                setError(apiError?.message || 'Error al cargar tickets.');
+                setError(apiError?.message || 'Error al cargar los tickets.');
                 addNotification(`Error al cargar tickets: ${apiError?.message || 'Error desconocido'}`, 'error');
-                if (err.response?.status === 401) signOut();
             } else {
-                setError('Ocurrió un error inesperado al cargar los tickets.');
+                setError('Ocurrió un error inesperado al cargar los tickets.'); // CORREGIDO: Solo un argumento para setError
+                addNotification('Ocurrió un error inesperado al cargar los tickets.', 'error');
             }
-            console.error('Error fetching tickets:', err);
-            setTickets([]); 
         } finally {
             setLoading(false);
         }
-    }, [token, addNotification, signOut, filterStatus, filterPriority, filterDepartment, filterAgent, searchTerm]);
+    }, [token, statusFilter, priorityFilter, departmentFilter, assignedToFilter, createdByFilter, addNotification]);
 
-    // Función para obtener un ticket específico por ID
-    const fetchTicketById = useCallback(async (ticketId: number) => {
-        try {
-            if (!token) {
-                addNotification('No autorizado. Token no disponible.', 'error');
-                return null;
-            }
-            const response = await api.get(`/api/tickets/${ticketId}`, {
-                headers: { Authorization: `Bearer ${token}` },
-            });
-            return response.data;
-        } catch (err: unknown) {
-            if (isAxiosErrorTypeGuard(err)) {
-                const apiError = err.response?.data as ApiResponseError;
-                addNotification(`Error al cargar detalle del ticket: ${apiError?.message || 'Error desconocido'}`, 'error');
-            } else {
-                addNotification('Ocurrió un error inesperado al cargar el detalle del ticket.', 'error');
-            }
-            console.error('Error fetching single ticket:', err);
-            return null;
-        }
-    }, [token, addNotification]);
-
-    // Función para obtener usuarios y departamentos (para los filtros y modales)
-    const fetchUsersAndDepartments = useCallback(async () => {
-        try {
-            if (!token) return;
-            const [usersRes, departmentsRes] = await Promise.all([
-                api.get('/api/users', { headers: { Authorization: `Bearer ${token}` } }),
-                api.get('/api/departments', { headers: { Authorization: `Bearer ${token}` } }),
-            ]);
-            setAllUsers(usersRes.data.users || []); 
-            setAllDepartments(departmentsRes.data.departments || []);
-            console.log('[DEBUG Tickets] Usuarios obtenidos para filtros/modales:', usersRes.data.users);
-            console.log('[DEBUG Tickets] Departamentos obtenidos para filtros/modales:', departmentsRes.data.departments);
-        } catch (err: unknown) {
-            console.error('Error fetching users or departments for filters/modals:', err);
-            if (isAxiosErrorTypeGuard(err) && err.response?.status === 401) {
-                signOut();
-            }
-        }
-    }, [token, signOut]);
-
-    // Efecto para cargar tickets y datos de filtros al montar y cuando cambian los filtros
     useEffect(() => {
-        fetchUsersAndDepartments(); 
         fetchTickets();
-    }, [fetchTickets, fetchUsersAndDepartments]);
-
-    // Handlers para modales de ticket
-    const handleViewTicket = useCallback(async (ticket: TicketData) => { 
-        const freshTicket = await fetchTicketById(ticket.id);
-        if (freshTicket) {
-            setSelectedTicket(freshTicket);
-            setIsTicketDetailModalOpen(true);
-        }
-    }, [fetchTicketById]);
-
-    const handleCloseTicketDetailModal = useCallback(() => {
-        setIsTicketDetailModalOpen(false);
-        setSelectedTicket(null);
-        fetchTickets(); 
     }, [fetchTickets]);
 
-    const handleCreateTicket = useCallback(() => {
-        setIsCreateTicketModalOpen(true);
-    }, []);
-
-    const handleTicketCreatedOrUpdated = useCallback(async (updatedTicketId?: number) => { 
-        setIsCreateTicketModalOpen(false);
-        if (updatedTicketId && isTicketDetailModalOpen) {
-            const freshTicket = await fetchTicketById(updatedTicketId);
-            if (freshTicket) {
-                setSelectedTicket(freshTicket);
-            }
-        } else {
-            fetchTickets(); 
+    const handleDeleteTicket = async (ticketId: number) => {
+        if (!window.confirm('¿Estás seguro de que quieres eliminar este ticket? Esta acción no se puede deshacer.')) {
+            return;
         }
-    }, [fetchTickets, fetchTicketById, isTicketDetailModalOpen]); 
-
-    const handleDeleteTicket = useCallback(async (ticketId: number) => {
-        const confirmed = window.confirm('¿Estás seguro de que quieres eliminar este ticket?');
-        if (!confirmed) return;
-
         setLoading(true);
+        setError(null);
         try {
-            if (!token) {
-                addNotification('No autorizado para eliminar tickets.', 'error');
-                return;
-            }
             await api.delete(`/api/tickets/${ticketId}`, {
                 headers: { Authorization: `Bearer ${token}` },
             });
             addNotification('Ticket eliminado exitosamente.', 'success');
-            fetchTickets(); 
+            fetchTickets();
         } catch (err: unknown) {
+            console.error('Error deleting ticket:', err);
             if (isAxiosErrorTypeGuard(err)) {
                 const apiError = err.response?.data as ApiResponseError;
+                setError(apiError?.message || 'Error al eliminar el ticket.');
                 addNotification(`Error al eliminar ticket: ${apiError?.message || 'Error desconocido'}`, 'error');
             } else {
+                setError('Ocurrió un error inesperado al eliminar el ticket.'); // CORREGIDO: Solo un argumento para setError
                 addNotification('Ocurrió un error inesperado al eliminar el ticket.', 'error');
             }
-            console.error('Error deleting ticket:', err);
         } finally {
             setLoading(false);
         }
-    }, [token, addNotification, fetchTickets]);
+    };
+
+    const handleAssignTicket = async (ticketId: number, agentId: number | null) => {
+        setLoading(true);
+        setError(null);
+        try {
+            await api.put(`/api/tickets/${ticketId}/assign`, { agent_id: agentId }, {
+                headers: { Authorization: `Bearer ${token}` },
+            });
+            addNotification('Ticket asignado exitosamente.', 'success');
+            fetchTickets();
+        } catch (err: unknown) {
+            console.error('Error assigning ticket:', err);
+            if (isAxiosErrorTypeGuard(err)) {
+                const apiError = err.response?.data as ApiResponseError;
+                setError(apiError?.message || 'Error al asignar el ticket.');
+                addNotification(`Error al asignar ticket: ${apiError?.message || 'Error desconocido'}`, 'error');
+            } else {
+                setError('Ocurrió un error inesperado al asignar el ticket.'); // CORREGIDO: Solo un argumento para setError
+                addNotification('Ocurrió un error inesperado al asignar el ticket.', 'error');
+            }
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleStatusChange = async (ticketId: number, newStatus: string) => {
+        setLoading(true);
+        setError(null);
+        try {
+            await api.put(`/api/tickets/${ticketId}/status`, { status: newStatus }, {
+                headers: { Authorization: `Bearer ${token}` },
+            });
+            addNotification('Estado del ticket actualizado exitosamente.', 'success');
+            fetchTickets();
+        } catch (err: unknown) {
+            console.error('Error changing ticket status:', err);
+            if (isAxiosErrorTypeGuard(err)) {
+                const apiError = err.response?.data as ApiResponseError;
+                setError(apiError?.message || 'Error al cambiar el estado del ticket.');
+                addNotification(`Error al cambiar estado: ${apiError?.message || 'Error desconocido'}`, 'error');
+            } else {
+                setError('Ocurrió un error inesperado al cambiar el estado del ticket.'); // CORREGIDO: Solo un argumento para setError
+                addNotification('Ocurrió un error inesperado al cambiar el estado del ticket.', 'error');
+            }
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handlePriorityChange = async (ticketId: number, newPriority: string) => {
+        setLoading(true);
+        setError(null);
+        try {
+            await api.put(`/api/tickets/${ticketId}/priority`, { priority: newPriority }, {
+                headers: { Authorization: `Bearer ${token}` },
+            });
+            addNotification('Prioridad del ticket actualizada exitosamente.', 'success');
+            fetchTickets();
+        } catch (err: unknown) {
+            console.error('Error changing ticket priority:', err);
+            if (isAxiosErrorTypeGuard(err)) {
+                const apiError = err.response?.data as ApiResponseError;
+                setError(apiError?.message || 'Error al cambiar la prioridad del ticket.');
+                addNotification(`Error al cambiar prioridad: ${apiError?.message || 'Error desconocido'}`, 'error');
+            } else {
+                setError('Ocurrió un error inesperado al cambiar la prioridad del ticket.'); // CORREGIDO: Solo un argumento para setError
+                addNotification('Ocurrió un error inesperado al cambiar la prioridad del ticket.', 'error');
+            }
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleDepartmentChange = async (ticketId: number, newDepartmentId: number) => {
+        setLoading(true);
+        setError(null);
+        try {
+            await api.put(`/api/tickets/${ticketId}/department`, { department_id: newDepartmentId }, {
+                headers: { Authorization: `Bearer ${token}` },
+            });
+            addNotification('Departamento del ticket actualizado exitosamente.', 'success');
+            fetchTickets();
+        } catch (err: unknown) {
+            console.error('Error changing ticket department:', err);
+            if (isAxiosErrorTypeGuard(err)) {
+                const apiError = err.response?.data as ApiResponseError;
+                setError(apiError?.message || 'Error al cambiar el departamento del ticket.');
+                addNotification(`Error al cambiar departamento: ${apiError?.message || 'Error desconocido'}`, 'error');
+            } else {
+                setError('Ocurrió un error inesperado al cambiar el departamento del ticket.'); // CORREGIDO: Solo un argumento para setError
+                addNotification('Ocurrió un error inesperado al cambiar el departamento del ticket.', 'error');
+            }
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const getDepartmentName = (id: number | null) => {
+        return departments.find(d => d.id === id)?.name || 'Desconocido';
+    };
+
+    const getUserUsername = (id: number | null) => {
+        return users.find(u => u.id === id)?.username || 'Sin Asignar';
+    };
+
+    const isAgent = user?.role === 'agent';
+    const isAdmin = user?.role === 'admin';
 
     if (loading) {
-        return (
-            <div className="loading-message text-center py-4">🔄 Cargando tickets...</div>
-        );
+        return <div className="flex justify-center items-center h-full"><span className="text-lg">Cargando tickets...</span></div>;
     }
 
     if (error) {
-        return (
-            <div className="error-message text-center p-4">
-                <p>{error}</p>
-                <button onClick={fetchTickets} className="button primary-button mt-2">Reintentar</button>
-            </div>
-        );
+        return <div className="text-red-500 text-center p-4">Error: {error}</div>;
     }
 
     return (
-        <div className="tickets-management p-4">
-            <h2 className="text-2xl font-bold text-gray-800 mb-4 text-center">Gestión de Tickets</h2>
-            <p className="text-gray-700 mb-6 text-center">Administra todos los tickets del sistema.</p>
+        <div className="container mx-auto p-4 sm:p-6 lg:p-8">
+            <h1 className="text-3xl font-bold text-gray-800 mb-6 border-b-2 border-blue-300 pb-2">Gestión de Tickets</h1>
 
-            {/* Controles de Filtrado y Búsqueda */}
-            <div className="flex flex-wrap items-center justify-between gap-4 mb-6 p-4 bg-gray-50 rounded-lg shadow-sm">
-                <input
-                    type="text"
-                    placeholder="Buscar por asunto, descripción, creador o agente..."
-                    className="form-input flex-1 min-w-[200px]"
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                />
+            <button
+                onClick={onCreateTicket}
+                className="mb-6 bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg shadow-md transition duration-300 ease-in-out transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-75"
+            >
+                Crear Nuevo Ticket
+            </button>
+
+            {/* Filtros */}
+            <select
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value)}
+                className="shadow border rounded py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+            >
+                <option value="">Todos los Estados</option>
+                <option value="open">Abierto</option>
+                <option value="in-progress">En Progreso</option>
+                <option value="resolved">Resuelto</option>
+                <option value="closed">Cerrado</option>
+                <option value="reopened">Reabierto</option>
+            </select>
+
+            <select
+                value={priorityFilter}
+                onChange={(e) => setPriorityFilter(e.target.value)}
+                className="shadow border rounded py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+            >
+                <option value="">Todas las Prioridades</option>
+                <option value="low">Baja</option>
+                <option value="medium">Media</option>
+                <option value="high">Alta</option>
+                <option value="urgent">Urgente</option>
+            </select>
+
+            <select
+                value={departmentFilter}
+                onChange={(e) => setDepartmentFilter(e.target.value)}
+                className="shadow border rounded py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+            >
+                <option value="">Todos los Departamentos</option>
+                {departments.map(dept => (
+                    <option key={dept.id} value={dept.id}>{dept.name}</option>
+                ))}
+            </select>
+
+            {(isAdmin || isAgent) && (
                 <select
-                    className="form-select min-w-[150px]"
-                    value={filterStatus}
-                    onChange={(e) => setFilterStatus(e.target.value)}
+                    value={assignedToFilter}
+                    onChange={(e) => setAssignedToFilter(e.target.value)}
+                    className="shadow border rounded py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
                 >
-                    <option value="all">Todos los estados</option>
-                    {Object.entries(ticketStatusTranslations).map(([key, value]) => (
-                        <option key={key} value={key}>{value}</option> 
-                    ))}
-                </select>
-                <select
-                    className="form-select min-w-[150px]"
-                    value={filterPriority}
-                    onChange={(e) => setFilterPriority(e.target.value)}
-                >
-                    <option value="all">Todas las prioridades</option>
-                    {Object.entries(ticketPriorityTranslations).map(([key, value]) => (
-                        <option key={key} value={key}>{value}</option> 
-                    ))}
-                </select>
-                <select
-                    className="form-select min-w-[150px]"
-                    value={filterDepartment}
-                    onChange={(e) => setFilterDepartment(e.target.value)}
-                >
-                    <option value="all">Todos los departamentos</option>
-                    {allDepartments.map(dept => (
-                        <option key={dept.id} value={dept.id}>{dept.name}</option>
-                    ))}
-                </select>
-                <select
-                    className="form-select min-w-[150px]"
-                    value={filterAgent}
-                    onChange={(e) => setFilterAgent(e.target.value)}
-                >
-                    <option value="all">Todos los agentes</option>
-                    <option value="unassigned">Sin asignar</option>
-                    {allUsers.filter(u => u.role === 'agent').map(agent => (
+                    <option value="">Todos los Agentes</option>
+                    <option value="null">Sin Asignar</option>
+                    {users.filter(u => u.role === 'agent').map(agent => (
                         <option key={agent.id} value={agent.id}>{agent.username}</option>
                     ))}
                 </select>
-                <button
-                    onClick={fetchTickets}
-                    className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-md transition-colors duration-200"
+            )}
+
+            {isAdmin && (
+                <select
+                    value={createdByFilter}
+                    onChange={(e) => setCreatedByFilter(e.target.value)}
+                    className="shadow border rounded py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
                 >
-                    Aplicar Filtros
-                </button>
-            </div>
-
-            <div className="flex justify-end mb-4">
-                <button onClick={handleCreateTicket} className="button primary-button">
-                    Crear Nuevo Ticket
-                </button>
-            </div>
-
-            {tickets.length > 0 ? (
-                <div className="overflow-x-auto bg-white rounded-lg shadow-md">
-                    <table className="min-w-full divide-y divide-gray-200">
-                        <thead className="bg-gray-100">
-                            <tr>
-                                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">ID</th>
-                                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Asunto</th>
-                                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Estado</th>
-                                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Prioridad</th>
-                                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Departamento</th>
-                                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Creador</th>
-                                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Asignado a</th>
-                                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Acciones</th>
-                            </tr>
-                        </thead>
-                        <tbody className="bg-white divide-y divide-gray-200">
-                            {tickets.map((ticket) => (
-                                <tr key={ticket.id}>
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{ticket.id}</td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{ticket.title}</td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm">
-                                        <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full 
-                                            ${ticket.status === 'open' ? 'bg-blue-100 text-blue-800' : ''}
-                                            ${ticket.status === 'in-progress' ? 'bg-yellow-100 text-yellow-800' : ''}
-                                            ${ticket.status === 'resolved' ? 'bg-green-100 text-green-800' : ''}
-                                            ${ticket.status === 'closed' ? 'bg-gray-100 text-gray-800' : ''}
-                                            ${ticket.status === 'reopened' ? 'bg-purple-100 text-purple-800' : ''}
-                                        `}>
-                                            {ticketStatusTranslations[ticket.status] || ticket.status}
-                                        </span>
-                                    </td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm">
-                                        <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full 
-                                            ${ticket.priority === 'low' ? 'bg-green-100 text-green-800' : ''}
-                                            ${ticket.priority === 'medium' ? 'bg-yellow-100 text-yellow-800' : ''}
-                                            ${ticket.priority === 'high' ? 'bg-red-100 text-red-800' : ''}
-                                            ${ticket.priority === 'urgent' ? 'bg-purple-100 text-purple-800' : ''}
-                                        `}>
-                                            {ticketPriorityTranslations[ticket.priority] || ticket.priority}
-                                        </span>
-                                    </td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{ticket.department_name || 'N/A'}</td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{ticket.user_username}</td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{ticket.agent_username || 'Sin asignar'}</td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                                        <button
-                                            onClick={() => handleViewTicket(ticket)}
-                                            className="text-indigo-600 hover:text-indigo-900 mr-3"
-                                        >
-                                            Ver
-                                        </button>
-                                        <button
-                                            onClick={() => handleDeleteTicket(ticket.id)}
-                                            className="text-red-600 hover:text-red-900"
-                                        >
-                                            Eliminar
-                                        </button>
-                                    </td>
-                                </tr>
-                            ))}
-                        </tbody>
-                    </table>
-                </div>
-            ) : (
-                <p className="info-text text-center">No hay tickets disponibles con los filtros actuales.</p>
+                    <option value="">Todos los Clientes</option>
+                    {users.filter(u => u.role === 'client').map(client => (
+                        <option key={client.id} value={client.id}>{client.username}</option>
+                    ))}
+                </select>
             )}
 
-            {/* Modales de Ticket (controlados internamente por este componente) */}
-            {isTicketDetailModalOpen && selectedTicket && (
-                <TicketDetailModal
-                    isOpen={isTicketDetailModalOpen}
-                    onClose={handleCloseTicketDetailModal}
-                    ticket={selectedTicket} 
-                    onTicketUpdated={() => handleTicketCreatedOrUpdated(selectedTicket.id)} 
-                    token={token}
-                    departments={allDepartments}
-                    users={allUsers}
-                />
-            )}
-            {isCreateTicketModalOpen && (
-                <CreateTicketModal
-                    isOpen={isCreateTicketModalOpen}
-                    onClose={() => setIsCreateTicketModalOpen(false)}
-                    onTicketCreated={handleTicketCreatedOrUpdated} 
-                    token={token}
-                    departments={allDepartments}
-                    users={allUsers}
-                />
-            )}
+            <button
+                onClick={fetchTickets}
+                className="bg-gray-600 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded-lg shadow-md transition duration-300 ease-in-out transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-opacity-75"
+            >
+                Aplicar Filtros
+            </button>
         </div>
     );
 };

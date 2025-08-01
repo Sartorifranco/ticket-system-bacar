@@ -1,116 +1,126 @@
+// backend/src/app.js
 const express = require('express');
-const cors = require('cors');
 const dotenv = require('dotenv');
-const asyncHandler = require('express-async-handler'); // Asegúrate de que este paquete esté instalado (npm install express-async-handler)
+const cors = require('cors');
+const path = require('path');
+const http = require('http');
+const { Server } = require('socket.io');
 
-// Carga variables de entorno
+// Cargar variables de entorno
 dotenv.config();
-
-// Importación de la conexión a la base de datos
-const pool = require('./config/db'); // Importa el pool directamente
-
-// Importación de tus rutas existentes
-const notificationRoutes = require('./routes/notificationRoutes');
-const authRoutes = require('./routes/authRoutes');
-const ticketRoutes = require('./routes/ticketRoutes');
-const departmentRoutes = require('./routes/departmentRoutes');
-const dashboardRoutes = require('./routes/dashboardRoutes'); // Importación de las rutas del dashboard
-
-// Importación de las rutas de administración (ya existente)
-const adminRoutes = require('./routes/adminRoutes');
-
-// NUEVA IMPORTACIÓN: Rutas para Claves Bacar
-const bacarKeysRoutes = require('./routes/bacarKeysRoutes');
-
-// NUEVA IMPORTACIÓN: Rutas para Activity Log
-const activityLogRoutes = require('./routes/activityLogRoutes'); // AÑADIDO
-
-// Importación de middlewares y controladores necesarios
-// CORRECCIÓN CLAVE AQUÍ: Desestructurar para obtener solo la función errorHandler
-const { errorHandler } = require('./middleware/errorMiddleware'); 
-const { protect, authorize } = require('./middleware/authMiddleware');
-
-// Controladores de usuario (importados directamente, ya que las rutas se definirán aquí)
-const userController = require('./controllers/userController'); 
-const {
-    getAllUsers,
-    getUserById,
-    createUser,
-    updateUser,
-    deleteUser,
-    changePassword 
-} = userController; 
 
 const app = express();
 
-// Middlewares globales
-app.use(cors());
-app.use(express.json()); // Para parsear JSON en el body de las peticiones
+// Crear un servidor HTTP a partir de la aplicación Express
+const server = http.createServer(app);
 
-// --- DEBUGGING: Verificando tipos de módulos de ruta antes de usarlos ---
-console.log('DEBUG: Tipo de notificationRoutes:', typeof notificationRoutes);
-console.log('DEBUG: Tipo de authRoutes:', typeof authRoutes);
-console.log('DEBUG: Tipo de ticketRoutes:', typeof ticketRoutes);
-console.log('DEBUG: Tipo de departmentRoutes:', typeof departmentRoutes);
-console.log('DEBUG: Tipo de dashboardRoutes:', typeof dashboardRoutes);
-console.log('DEBUG: Tipo de adminRoutes:', typeof adminRoutes);
-console.log('DEBUG: Tipo de bacarKeysRoutes:', typeof bacarKeysRoutes);
-console.log('DEBUG: Tipo de activityLogRoutes:', typeof activityLogRoutes);
-// --- FIN DEBUGGING ---
+// Configurar Socket.IO
+const io = new Server(server, {
+    cors: {
+        origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+        methods: ['GET', 'POST'],
+        credentials: true
+    }
+});
 
+// Middleware para parsear JSON
+app.use(express.json());
 
-// Definición de las rutas de la API que usan módulos de router separados
-app.use('/api/notifications', notificationRoutes);
+// Configuración de CORS para Express (para las rutas REST)
+app.use(cors({
+    origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+    methods: ['GET', 'POST', 'PUT', 'DELETE'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+}));
+
+// Conexión a la base de datos
+const pool = require('./config/db');
+
+// Importar rutas
+const authRoutes = require('./routes/authRoutes');
+const userRoutes = require('./routes/userRoutes');
+const ticketRoutes = require('./routes/ticketRoutes');
+const departmentRoutes = require('./routes/departmentRoutes');
+const notificationRoutes = require('./routes/notificationRoutes');
+const activityLogRoutes = require('./routes/activityLogRoutes');
+const dashboardRoutes = require('./routes/dashboardRoutes');
+const reportRoutes = require('./routes/reportRoutes');
+const feedbackRoutes = require('./routes/feedbackRoutes'); // Ya estaba descomentada
+const bacarKeyRoutes = require('./routes/bacarKeyRoutes'); // <-- ¡DESCOMENTADA!
+
+// Usar rutas
 app.use('/api/auth', authRoutes);
+app.use('/api/users', userRoutes);
 app.use('/api/tickets', ticketRoutes);
 app.use('/api/departments', departmentRoutes);
-app.use('/api/dashboard', dashboardRoutes); // Uso de las rutas del dashboard
+app.use('/api/notifications', notificationRoutes);
+app.use('/api/activity-logs', activityLogRoutes);
+app.use('/api/dashboard', dashboardRoutes);
+app.use('/api/reports', reportRoutes);
+app.use('/api/feedback', feedbackRoutes); // Ya estaba descomentada
+app.use('/api/bacar-keys', bacarKeyRoutes); // <-- ¡DESCOMENTADA!
 
-// Monta las rutas de administración
-app.use('/api/admin', adminRoutes);
+// Hacer que 'io' esté disponible en las solicitudes de Express
+app.set('io', io);
 
-// Monta las rutas de Claves Bacar
-app.use('/api/bacar-keys', bacarKeysRoutes);
+// Lógica de Socket.IO
+io.on('connection', (socket) => {
+    console.log(`[Socket.IO Server] Usuario conectado: ${socket.id}`);
 
-// NUEVO: Monta las rutas de Activity Log
-app.use('/api/activity-logs', activityLogRoutes); // AÑADIDO
+    const token = socket.handshake.auth.token;
+    if (token) {
+        try {
+            const jwt = require('jsonwebtoken');
+            const decoded = jwt.verify(token, process.env.JWT_SECRET);
+            socket.user = decoded;
+            console.log(`[Socket.IO Server] Socket ${socket.id} autenticado como usuario ${decoded.id} (${decoded.role})`);
 
-// --- INICIO: Rutas de Usuario (DEFINIDAS DIRECTAMENTE EN 'app' para evitar problemas de contexto) ---
-// Usamos asyncHandler para envolver los controladores y manejar errores de forma asíncrona
-app.get('/api/users', protect, authorize(['admin']), asyncHandler(getAllUsers));
-app.post('/api/users', protect, authorize(['admin']), asyncHandler(createUser));
-app.get('/api/users/:id', protect, authorize(['admin']), asyncHandler(getUserById));
-app.put('/api/users/:id', protect, authorize(['admin']), asyncHandler(updateUser));
+            if (decoded.role) {
+                socket.join(decoded.role);
+                console.log(`[Socket.IO Server] Socket ${socket.id} se unió a la sala '${decoded.role}'.`);
+            }
+            if (decoded.department_id) {
+                socket.join(`department-${decoded.department_id}`);
+                console.log(`[Socket.IO Server] Socket ${socket.id} se unió a la sala 'department-${decoded.department_id}'.`);
+            }
 
-// Añadir una ruta para cambiar la contraseña del usuario (si existe en userController)
-if (typeof changePassword === 'function') {
-    app.put('/api/users/:id/change-password', protect, asyncHandler(changePassword));
+        } catch (error) {
+            console.error('[Socket.IO Server] Error de autenticación de Socket.IO:', error.message);
+            socket.disconnect(true);
+        }
+    } else {
+        console.log('[Socket.IO Server] Socket conectado sin token de autenticación.');
+    }
+
+    socket.on('joinRoom', ({ roomName, userId }) => {
+        socket.join(roomName);
+        console.log(`[Socket.IO Server] Socket ${socket.id} se unió a la sala '${roomName}'.`);
+    });
+
+    socket.on('leaveRoom', ({ roomName }) => {
+        socket.leave(roomName);
+        console.log(`[Socket.IO Server] Socket ${socket.id} dejó la sala '${roomName}'.`);
+    });
+
+    socket.on('disconnect', (reason) => {
+        console.log(`[Socket.IO Server] Usuario desconectado: ${socket.id}. Razón: ${reason}`);
+    });
+});
+
+
+// Servir archivos estáticos en producción
+if (process.env.NODE_ENV === 'production') {
+    app.use(express.static(path.join(__dirname, '../../frontend/build')));
+
+    app.get('*', (req, res) =>
+        res.sendFile(path.resolve(__dirname, '../../frontend', 'build', 'index.html'))
+    );
 } else {
-    console.warn('WARNING: userController.changePassword is not a function. Route /api/users/:id/change-password will not be active.');
+    app.get('/', (req, res) => res.send('API is running...'));
 }
 
-app.delete('/api/users/:id', protect, authorize(['admin']), asyncHandler(deleteUser));
-// --- FIN: Rutas de Usuario ---
-
-// Middleware de manejo de errores (debe ser el ÚLTIMO middleware en la cadena)
-app.use(errorHandler); // Ahora errorHandler es la función correcta
-
-// Configuración del puerto del servidor
 const PORT = process.env.PORT || 5000;
-const HOST = '0.0.0.0'; // Escuchar en todas las interfaces de red
 
-// Iniciar el servidor Express
-app.listen(PORT, HOST, () => {
-    console.log(`Servidor iniciado en http://${HOST}:${PORT}`);
-    // Verificar conexión a la base de datos al iniciar el servidor
-    pool.getConnection()
-        .then(connection => {
-            console.log('Conectado a la base de datos MySQL!');
-            connection.release(); // Liberar la conexión inmediatamente después de la prueba
-        })
-        .catch(err => {
-            console.error('Error al conectar con la base de datos:', err);
-            // Si la base de datos es crítica para iniciar, puedes salir del proceso
-            // process.exit(1); 
-        });
+server.listen(PORT, () => {
+    console.log(`Servidor iniciado en http://0.0.0.0:${PORT}`);
 });

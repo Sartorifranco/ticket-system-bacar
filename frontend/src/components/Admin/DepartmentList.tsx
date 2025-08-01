@@ -1,13 +1,12 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import departmentService, { Department } from '../../services/departmentService';
-// Eliminadas las importaciones de react-icons/fa
 import { useAuth } from '../../context/AuthContext';
-import { useNotification } from '../../context/NotificationContext'; // <-- AÑADIDO: Importar useNotification
+import { useNotification } from '../../context/NotificationContext';
 import { isAxiosErrorTypeGuard, ApiResponseError } from '../../utils/typeGuards';
 
 const DepartmentList: React.FC = () => {
-    const { token } = useAuth(); // <-- MODIFICADO: Solo token de useAuth
-    const { addNotification } = useNotification(); // <-- AÑADIDO: addNotification de useNotification
+    const { token } = useAuth();
+    const { addNotification } = useNotification();
     const [departments, setDepartments] = useState<Department[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
@@ -15,6 +14,10 @@ const DepartmentList: React.FC = () => {
     const [currentDepartment, setCurrentDepartment] = useState<Department | null>(null);
     const [newDepartmentName, setNewDepartmentName] = useState('');
     const [newDepartmentDescription, setNewDepartmentDescription] = useState('');
+
+    // --- NUEVO ESTADO PARA EL MODAL DE CONFIRMACIÓN ---
+    const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false);
+    const [departmentToDeleteId, setDepartmentToDeleteId] = useState<number | null>(null);
 
     const fetchDepartments = useCallback(async () => {
         setLoading(true);
@@ -119,30 +122,39 @@ const DepartmentList: React.FC = () => {
         }
     };
 
-    const handleDeleteDepartment = async (id: number) => {
-        if (window.confirm('¿Estás seguro de que quieres eliminar este departamento? Esta acción es irreversible.')) {
-            setLoading(true);
-            setError(null);
-            try {
-                if (!token) {
-                    addNotification('No autorizado para eliminar departamento.', 'error');
-                    return;
-                }
-                await departmentService.deleteDepartment(token, id);
-                addNotification('Departamento eliminado exitosamente.', 'success');
-                fetchDepartments();
-            } catch (err: unknown) {
-                if (isAxiosErrorTypeGuard(err)) {
-                    const apiError = err.response?.data as ApiResponseError;
-                    setError(apiError?.message || 'Error al eliminar departamento.');
-                    addNotification(`Error al eliminar departamento: ${apiError?.message || 'Error desconocido'}`, 'error');
-                } else {
-                    setError('Ocurrió un error inesperado al eliminar el departamento.');
-                }
-                console.error('Error deleting department:', err);
-            } finally {
-                setLoading(false);
+    // --- MODIFICADO: Función para abrir el modal de confirmación ---
+    const handleDeleteClick = (id: number) => {
+        setDepartmentToDeleteId(id);
+        setIsConfirmModalOpen(true);
+    };
+
+    // --- NUEVO: Función para confirmar y ejecutar la eliminación ---
+    const confirmDeleteDepartment = async () => {
+        if (departmentToDeleteId === null) return; // No hay ID para eliminar
+
+        setIsConfirmModalOpen(false); // Cerrar el modal de confirmación
+        setLoading(true);
+        setError(null);
+        try {
+            if (!token) {
+                addNotification('No autorizado para eliminar departamento.', 'error');
+                return;
             }
+            await departmentService.deleteDepartment(token, departmentToDeleteId);
+            addNotification('Departamento eliminado exitosamente.', 'success');
+            fetchDepartments();
+        } catch (err: unknown) {
+            if (isAxiosErrorTypeGuard(err)) {
+                const apiError = err.response?.data as ApiResponseError;
+                setError(apiError?.message || 'Error al eliminar departamento.');
+                addNotification(`Error al eliminar departamento: ${apiError?.message || 'Error desconocido'}`, 'error');
+            } else {
+                setError('Ocurrió un error inesperado al eliminar el departamento.');
+            }
+            console.error('Error deleting department:', err);
+        } finally {
+            setLoading(false);
+            setDepartmentToDeleteId(null); // Limpiar el ID después de la operación
         }
     };
 
@@ -200,7 +212,7 @@ const DepartmentList: React.FC = () => {
                                             </svg> Editar
                                         </button>
                                         <button
-                                            onClick={() => handleDeleteDepartment(department.id)}
+                                            onClick={() => handleDeleteClick(department.id)} /* MODIFICADO: Llama a handleDeleteClick */
                                             className="text-red-600 hover:text-red-900"
                                             title="Eliminar Departamento"
                                         >
@@ -268,6 +280,38 @@ const DepartmentList: React.FC = () => {
                                 </button>
                             </div>
                         </form>
+                    </div>
+                </div>
+            )}
+
+            {/* --- NUEVO: Modal de Confirmación de Eliminación --- */}
+            {isConfirmModalOpen && (
+                <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full flex justify-center items-center z-50">
+                    <div className="bg-white p-6 rounded-lg shadow-xl w-full max-w-sm">
+                        <h3 className="text-xl font-bold mb-4 text-gray-800">Confirmar Eliminación</h3>
+                        <p className="mb-6 text-gray-700">
+                            ¿Estás seguro de que quieres eliminar este departamento? Esta acción es irreversible.
+                        </p>
+                        <div className="flex justify-end space-x-4">
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setIsConfirmModalOpen(false);
+                                    setDepartmentToDeleteId(null);
+                                }}
+                                className="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-4 rounded-md transition-colors duration-200"
+                            >
+                                Cancelar
+                            </button>
+                            <button
+                                type="button"
+                                onClick={confirmDeleteDepartment}
+                                className="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-md transition-colors duration-200"
+                                disabled={loading}
+                            >
+                                {loading ? 'Eliminando...' : 'Eliminar'}
+                            </button>
+                        </div>
                     </div>
                 </div>
             )}

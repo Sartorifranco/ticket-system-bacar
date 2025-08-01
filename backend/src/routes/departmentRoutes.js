@@ -1,25 +1,40 @@
 // backend/src/routes/departmentRoutes.js
 const express = require('express');
-const router = express.Router();
 const {
     getAllDepartments,
     getDepartmentById,
     createDepartment,
     updateDepartment,
     deleteDepartment
-} = require('../controllers/departmentController'); // Importa las funciones del controlador
+} = require('../controllers/departmentController');
+// CAMBIADO: Importa 'authenticateToken' en lugar de 'protect'
+const { authenticateToken, authorize } = require('../middleware/authMiddleware'); // <-- ¡CAMBIO AQUÍ!
 
-const { protect, authorize } = require('../middleware/authMiddleware');
+const router = express.Router();
 
-// Rutas para departamentos
-router.route('/')
-    // GET /api/departments - Obtener todos los departamentos (accesible para admin, agent, y client)
-    .get(protect, authorize(['admin', 'agent', 'client']), getAllDepartments) // Acceso ampliado para clientes
-    .post(protect, authorize(['admin']), createDepartment);
+// @route   GET /api/departments
+// @desc    Get all departments
+// @access  Private (Admin, Agent, Client)
+router.get('/', authenticateToken, authorize(['admin', 'agent', 'client']), getAllDepartments); // <-- ¡CAMBIO AQUÍ!
 
-router.route('/:id')
-    .get(protect, authorize(['admin', 'agent', 'client']), getDepartmentById) // Acceso ampliado para clientes
-    .put(protect, authorize(['admin']), updateDepartment)
-    .delete(protect, authorize(['admin']), deleteDepartment);
+// @route   GET /api/departments/:id
+// @desc    Get single department by ID
+// @access  Private (Admin, Agent)
+router.get('/:id', authenticateToken, authorize(['admin', 'agent']), getDepartmentById); // <-- ¡CAMBIO AQUÍ!
+
+// @route   POST /api/departments
+// @desc    Create new department
+// @access  Private (Admin only)
+router.post('/', authenticateToken, authorize(['admin']), createDepartment); // <-- ¡CAMBIO AQUÍ!
+
+// @route   PUT /api/departments/:id
+// @desc    Update department
+// @access  Private (Admin only)
+router.put('/:id', authenticateToken, authorize(['admin']), updateDepartment); // <-- ¡CAMBIO AQUÍ!
+
+// @route   DELETE /api/departments/:id
+// @desc    Delete department
+// @access  Private (Admin only)
+router.delete('/:id', authenticateToken, authorize(['admin']), deleteDepartment); // <-- ¡CAMBIO AQUÍ!
 
 module.exports = router;

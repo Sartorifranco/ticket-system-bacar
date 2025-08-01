@@ -1,128 +1,193 @@
 // backend/src/controllers/authController.js
-const asyncHandler = require('express-async-handler');
+const pool = require('../config/db');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-const pool = require('../config/db'); // Asume que tienes un archivo db.js en config
+const asyncHandler = require('../middleware/asyncHandler');
+const { logActivity } = require('../services/activityLogService'); // Importar el servicio de log
 
-// @desc    Registrar un nuevo usuario
+// Función auxiliar para generar el token JWT
+const generateToken = (id, role, department_id) => {
+    return jwt.sign({ id, role, department_id }, process.env.JWT_SECRET, {
+        expiresIn: process.env.JWT_EXPIRES_IN,
+    });
+};
+
+// @desc    Register new user
 // @route   POST /api/auth/register
-// @access  Public
+// @access  Public (inicialmente, luego podría ser restringido por admin)
 const registerUser = asyncHandler(async (req, res) => {
     const { username, email, password, role, department_id } = req.body;
 
-    // Validación básica de campos
-    if (!username || !email || !password) {
+    if (!username || !email || !password || !role) {
         res.status(400);
-        throw new Error('Por favor, ingresa todos los campos requeridos: nombre de usuario, email y contraseña.');
+        throw new Error('Por favor, ingresa todos los campos requeridos: username, email, password, role.');
     }
 
-    // Verificar si el usuario ya existe
-    const [existingUsers] = await pool.query('SELECT id FROM users WHERE email = ? OR username = ?', [email, username]);
-
-    if (existingUsers.length > 0) {
+    // Validar si el rol es válido
+    const validRoles = ['admin', 'agent', 'client'];
+    if (!validRoles.includes(role)) {
         res.status(400);
-        throw new Error('El usuario con ese email o nombre de usuario ya existe.');
+        throw new Error('Rol inválido. Los roles permitidos son: admin, agent, client.');
+    }
+
+    // Validar department_id para agentes
+    if (role === 'agent' && !department_id) {
+        res.status(400);
+        throw new Error('Los agentes deben tener un department_id asignado.');
+    }
+    // Asegurarse de que department_id sea null para clientes y admins si no aplica
+    const finalDepartmentId = (role === 'agent' && department_id) ? department_id : null;
+
+    // Comprobar si el usuario ya existe
+    const [userExistsRows] = await pool.execute('SELECT * FROM users WHERE email = ?', [email]);
+    if (userExistsRows.length > 0) {
+        res.status(400);
+        throw new Error('El usuario ya existe con ese email.');
     }
 
     // Hash de la contraseña
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(password, salt);
 
-    // Determinar el rol (por defecto 'client' si no se especifica o no es válido)
-    const userRole = ['admin', 'agent', 'client'].includes(role) ? role : 'client';
-    
-    // Si el rol es 'agent' y no se proporciona department_id, o si department_id no es válido
-    let finalDepartmentId = null;
-    if (userRole === 'agent' && department_id) {
-        const [departments] = await pool.query('SELECT id FROM departments WHERE id = ?', [department_id]);
-        if (departments.length > 0) {
-            finalDepartmentId = department_id;
-        } else {
-            // Opcional: Lanzar un error o asignar a null si el department_id no es válido
-            console.warn(`Departamento con ID ${department_id} no encontrado para el agente ${username}. Asignando a NULL.`);
-        }
-    }
-
-    // Insertar nuevo usuario en la base de datos
-    const [result] = await pool.query(
-        'INSERT INTO users (username, email, password_hash, role, department_id) VALUES (?, ?, ?, ?, ?)',
-        [username, email, hashedPassword, userRole, finalDepartmentId]
+    // Insertar usuario en la base de datos
+    const [result] = await pool.execute(
+        `INSERT INTO users (username, email, password_hash, role, department_id)
+         VALUES (?, ?, ?, ?, ?)`,
+        [username, email, hashedPassword, role, finalDepartmentId]
     );
 
-    const userId = result.insertId;
+    const newUserId = result.insertId; // ID del usuario recién insertado (para MySQL)
+    const [newUserRows] = await pool.execute('SELECT id, username, email, role, department_id FROM users WHERE id = ?', [newUserId]);
+    const newUser = newUserRows[0];
 
-    if (userId) {
-        res.status(201).json({
-            id: userId,
-            username,
-            email,
-            role: userRole,
-            department_id: finalDepartmentId,
-            token: generateToken(userId),
-        });
-    } else {
-        res.status(400);
-        throw new Error('Datos de usuario inválidos');
+    if (!newUser) {
+        res.status(500);
+        throw new Error('Error al recuperar el usuario recién registrado.');
     }
+
+    // Generar token JWT con el ID, ROL y DEPARTMENT_ID del usuario
+    const token = generateToken(newUser.id, newUser.role, newUser.department_id);
+
+    // --- REGISTRAR ACTIVIDAD DE REGISTRO ---
+    console.log(`[AuthController] Llamando logActivity para registro de usuario ${newUser.id}`);
+    await logActivity(
+        newUser.id,
+        newUser.username, // username
+        newUser.role,     // user_role
+        'user',           // action_type
+        `Usuario ${newUser.username} se ha registrado como ${newUser.role}.`, // description
+        'user',           // target_type
+        newUser.id,       // target_id
+        null,             // old_value
+        { username: newUser.username, email: newUser.email, role: newUser.role } // new_value
+    );
+    // ------------------------------------
+
+    res.status(201).json({
+        id: newUser.id,
+        username: newUser.username,
+        email: newUser.email,
+        role: newUser.role,
+        department_id: newUser.department_id,
+        token: token,
+    });
 });
 
-// @desc    Autenticar un usuario
+// @desc    Authenticate user & get token
 // @route   POST /api/auth/login
 // @access  Public
 const loginUser = asyncHandler(async (req, res) => {
     const { email, password } = req.body;
 
-    // Verificar si el usuario existe por email
-    const [users] = await pool.query('SELECT id, username, email, password_hash, role, department_id FROM users WHERE email = ?', [email]);
+    // Comprobar si el usuario existe y obtener su hash de contraseña
+    const [userRows] = await pool.execute('SELECT id, username, email, password_hash, role, department_id FROM users WHERE email = ?', [email]);
+    const user = userRows[0];
 
-    if (users.length === 0) {
-        res.status(400);
-        throw new Error('Credenciales inválidas');
+    if (user && (await bcrypt.compare(password, user.password_hash))) {
+        // Generar token JWT con el ID, ROL y DEPARTMENT_ID del usuario
+        const token = generateToken(user.id, user.role, user.department_id);
+
+        // --- REGISTRAR ACTIVIDAD DE LOGIN ---
+        console.log(`[AuthController] Llamando logActivity para login de usuario ${user.id}`);
+        await logActivity(
+            user.id,
+            user.username, // username
+            user.role,     // user_role
+            'user',           // action_type
+            `Usuario ${user.username} ha iniciado sesión.`, // description
+            'user',           // target_type
+            user.id,          // target_id
+            null,             // old_value
+            { ip: req.ip }    // new_value (solo se registra la IP en este caso)
+        );
+        // ------------------------------------
+
+        res.json({
+            id: user.id,
+            username: user.username,
+            email: user.email,
+            role: user.role,
+            department_id: user.department_id,
+            token: token,
+        });
+    } else {
+        res.status(401);
+        throw new Error('Credenciales inválidas (email o contraseña incorrectos).');
     }
-
-    const user = users[0];
-
-    // Comparar contraseña
-    const isMatch = await bcrypt.compare(password, user.password_hash);
-
-    if (!isMatch) {
-        res.status(400);
-        throw new Error('Credenciales inválidas');
-    }
-
-    res.json({
-        id: user.id,
-        username: user.username,
-        email: user.email,
-        role: user.role,
-        department_id: user.department_id,
-        token: generateToken(user.id),
-    });
 });
 
-// @desc    Obtener datos del usuario actual
+// @desc    Get user data
 // @route   GET /api/auth/me
 // @access  Private
 const getMe = asyncHandler(async (req, res) => {
-    // El usuario ya está adjunto a req.user por el middleware 'protect'
-    res.json({
-        id: req.user.id,
-        username: req.user.username,
-        email: req.user.email,
-        role: req.user.role,
-        department_id: req.user.department_id,
-    });
+    // req.user viene del middleware 'protect'
+    const [rows] = await pool.execute('SELECT id, username, email, role, department_id FROM users WHERE id = ?', [req.user.id]);
+    const user = rows[0];
+
+    if (user) {
+        res.json({
+            id: user.id,
+            username: user.username,
+            email: user.email,
+            role: user.role,
+            department_id: user.department_id,
+        });
+    } else {
+        res.status(401);
+        throw new Error('Usuario no autenticado o no encontrado.');
+    }
 });
 
-// Generar JWT
-const generateToken = (id) => {
-    return jwt.sign({ id }, process.env.JWT_SECRET, {
-        expiresIn: '1h', // Token expira en 1 hora
-    });
-};
+// @desc    Logout user
+// @route   POST /api/auth/logout (o GET, dependiendo de tu implementación)
+// @access  Private
+const logoutUser = asyncHandler(async (req, res) => {
+    // Asegúrate de que req.user esté disponible (viene del middleware de autenticación)
+    const userId = req.user ? req.user.id : null; 
+    const username = req.user ? req.user.username : 'Desconocido';
+    const userRole = req.user ? req.user.role : 'N/A';
+    
+    // --- REGISTRAR ACTIVIDAD DE LOGOUT ---
+    console.log(`[AuthController] Llamando logActivity para logout de usuario ${userId}`);
+    await logActivity(
+        userId,
+        username,
+        userRole,
+        'user',           // action_type
+        `Usuario ${username} ha cerrado sesión.`, // description
+        'user',           // target_type
+        userId,           // target_id
+        null,             // old_value
+        null              // new_value
+    );
+    // ------------------------------------
+    res.status(200).json({ message: 'Sesión cerrada exitosamente.' });
+});
+
 
 module.exports = {
     registerUser,
     loginUser,
     getMe,
+    logoutUser, // Asegúrate de exportar logoutUser si lo usas en tus rutas
 };

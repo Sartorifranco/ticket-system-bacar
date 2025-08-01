@@ -1,11 +1,10 @@
-// frontend/src/components/NotificationBell/NotificationDropdown.tsx
-import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useState, useEffect, useCallback } from 'react';
 import api from '../../config/axiosConfig';
 import { useAuth } from '../../context/AuthContext';
-import { useNotification } from '../../context/NotificationContext'; // <-- AÑADIDO: Importar useNotification
+import { useNotification } from '../../context/NotificationContext'; // Importar useNotification
 import { Notification } from '../../types';
 import { isAxiosErrorTypeGuard, ApiResponseError } from '../../utils/typeGuards';
+import { format } from 'date-fns';
 
 interface NotificationDropdownProps {
     isOpen: boolean;
@@ -13,40 +12,35 @@ interface NotificationDropdownProps {
 }
 
 const NotificationDropdown: React.FC<NotificationDropdownProps> = ({ isOpen, onClose }) => {
-    // MODIFICADO: token y fetchUnreadNotificationsCount de useAuth, addNotification de useNotification
-    const { token, fetchUnreadNotificationsCount } = useAuth(); 
-    const { addNotification, markNotificationAsRead } = useNotification(); // <-- AÑADIDO: Obtener addNotification y markNotificationAsRead del contexto de notificaciones
+    // MODIFICADO: fetchUnreadNotificationsCount ahora viene de useNotification
+    const { token } = useAuth();
+    const { addNotification, markNotificationAsRead, fetchNotifications: fetchUnreadNotificationsCount } = useNotification(); // Obtener fetchUnreadNotificationsCount del contexto de notificaciones
     const [notifications, setNotifications] = useState<Notification[]>([]);
     const [loading, setLoading] = useState(false);
-    const [error, setError] = useState<string | null>(null);
-    const dropdownRef = useRef<HTMLDivElement>(null);
-    const navigate = useNavigate();
+    // Eliminado el estado 'error' local, ya que useNotification lo maneja
+    // const [error, setError] = useState<string | null>(null);
 
-    const fetchNotifications = useCallback(async () => {
+    const fetchNotificationsData = useCallback(async () => {
+        if (!token) {
+            // addNotification('No autorizado para cargar notificaciones.', 'error'); // Esto podría causar un bucle si se llama constantemente
+            setNotifications([]);
+            return;
+        }
         setLoading(true);
-        setError(null);
+        // setError(null); // Eliminado
         try {
-            if (!token) {
-                // Si no hay token, no hay notificaciones que cargar
-                setNotifications([]);
-                setLoading(false);
-                return;
-            }
             const response = await api.get('/api/notifications', {
                 headers: { Authorization: `Bearer ${token}` },
             });
-            // Asegurarse de que las notificaciones vengan ordenadas por fecha de creación descendente
-            const sortedNotifications = Array.isArray(response.data)
-                ? response.data.sort((a: Notification, b: Notification) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
-                : [];
-            setNotifications(sortedNotifications);
+            setNotifications(Array.isArray(response.data) ? response.data : response.data.notifications || []);
         } catch (err: unknown) {
             if (isAxiosErrorTypeGuard(err)) {
                 const apiError = err.response?.data as ApiResponseError;
-                setError(apiError?.message || 'Error al cargar notificaciones.');
+                // setError(apiError?.message || 'Error al cargar notificaciones.'); // Eliminado
                 addNotification(`Error al cargar notificaciones: ${apiError?.message || 'Error desconocido'}`, 'error');
             } else {
-                setError('Ocurrió un error inesperado al cargar las notificaciones.');
+                // setError('Ocurrió un error inesperado al cargar las notificaciones.'); // Eliminado
+                addNotification('Ocurrió un error inesperado al cargar las notificaciones.', 'error');
             }
             console.error('Error fetching notifications:', err);
             setNotifications([]);
@@ -55,114 +49,63 @@ const NotificationDropdown: React.FC<NotificationDropdownProps> = ({ isOpen, onC
         }
     }, [token, addNotification]);
 
-    // MODIFICADO: markNotificationAsRead ahora es parte de useNotification, por lo que se elimina su definición aquí
-    // y se usa la que viene del hook useNotification.
-    // La función markAllNotificationsAsRead también se mueve al NotificationContext.
-    // Se asume que markNotificationAsRead y markAllNotificationsAsRead están en NotificationContext.
-
-    const markAllNotificationsAsRead = useCallback(async () => {
-        try {
-            if (!token) return;
-            await api.put('/api/notifications/mark-all-read', {}, {
-                headers: { Authorization: `Bearer ${token}` },
-            });
-            // Actualizar el estado local
-            setNotifications(prev => prev.map(notif => ({ ...notif, is_read: true })));
-            fetchUnreadNotificationsCount(); // Actualizar el contador de la campana
-            addNotification('Todas las notificaciones marcadas como leídas.', 'success');
-        } catch (err) {
-            console.error('Error marking all notifications as read:', err);
-            addNotification('Error al marcar todas las notificaciones como leídas.', 'error');
-        }
-    }, [token, addNotification, fetchUnreadNotificationsCount]);
-
-    // Efecto para cargar notificaciones cuando el dropdown se abre
     useEffect(() => {
         if (isOpen) {
-            fetchNotifications();
+            fetchNotificationsData();
         }
-    }, [isOpen, fetchNotifications]);
+    }, [isOpen, fetchNotificationsData]);
 
-    // Manejar clics fuera del dropdown para cerrarlo
-    useEffect(() => {
-        const handleClickOutside = (event: MouseEvent) => {
-            if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
-                onClose();
-            }
-        };
-        if (isOpen) {
-            document.addEventListener('mousedown', handleClickOutside);
-        } else {
-            document.removeEventListener('mousedown', handleClickOutside);
-        }
-        return () => {
-            document.removeEventListener('mousedown', handleClickOutside);
-        };
-    }, [isOpen, onClose]);
+    const handleMarkAsRead = useCallback(async (notificationId: number) => {
+        await markNotificationAsRead(notificationId); // Llama a la función del contexto
+        fetchNotificationsData(); // Refresca la lista de notificaciones en el dropdown
+        fetchUnreadNotificationsCount(); // Actualiza el contador de notificaciones no leídas
+    }, [markNotificationAsRead, fetchNotificationsData, fetchUnreadNotificationsCount]);
 
-    const handleNotificationClick = useCallback((notification: Notification) => {
-        if (!notification.is_read) {
-            markNotificationAsRead(notification.id); // Usar markNotificationAsRead del NotificationContext
-        }
-        // Opcional: Navegar a la entidad relacionada si existe
-        if (notification.related_type === 'ticket' && notification.related_id) {
-            navigate(`/ticket/${notification.related_id}`); // Asume una ruta para ver tickets individuales
-        }
-        onClose(); // Cerrar el dropdown después de hacer clic en una notificación
-    }, [markNotificationAsRead, navigate, onClose]);
-
-    const formatTimestamp = (timestamp: string) => {
-        return new Date(timestamp).toLocaleString('es-ES', {
-            day: '2-digit', month: '2-digit', year: 'numeric',
-            hour: '2-digit', minute: '2-digit'
-        });
-    };
 
     if (!isOpen) return null;
 
     return (
-        <div
-            ref={dropdownRef}
-            className="absolute right-0 mt-2 w-80 bg-white dark:bg-gray-700 rounded-lg shadow-lg overflow-hidden z-50 border border-gray-200 dark:border-gray-600"
-        >
-            <div className="p-4 border-b border-gray-200 dark:border-gray-600 flex justify-between items-center">
-                <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Notificaciones</h3>
-                {notifications.some(n => !n.is_read) && (
-                    <button
-                        onClick={markAllNotificationsAsRead}
-                        className="text-blue-600 dark:text-blue-400 text-sm hover:underline"
-                        disabled={loading}
-                    >
-                        Marcar todas como leídas
-                    </button>
-                )}
+        <div className="absolute right-0 mt-2 w-80 bg-white rounded-lg shadow-xl py-2 z-50 border border-gray-200 dark:bg-gray-800 dark:border-gray-700">
+            <div className="px-4 py-2 text-lg font-semibold text-gray-800 border-b border-gray-200 dark:text-gray-200 dark:border-gray-700">
+                Notificaciones
             </div>
             {loading ? (
-                <div className="p-4 text-center text-gray-600 dark:text-gray-300">Cargando notificaciones...</div>
-            ) : error ? (
-                <div className="p-4 text-center text-red-500">{error}</div>
+                <div className="text-center py-4 text-gray-600 dark:text-gray-400">Cargando notificaciones...</div>
             ) : notifications.length === 0 ? (
-                <div className="p-4 text-center text-gray-600 dark:text-gray-300">No hay notificaciones.</div>
+                <div className="text-center py-4 text-gray-600 dark:text-gray-400">No hay notificaciones.</div>
             ) : (
                 <div className="max-h-80 overflow-y-auto">
-                    {notifications.map((notif) => (
+                    {notifications.map((notification) => (
                         <div
-                            key={notif.id}
-                            className={`p-4 border-b border-gray-100 dark:border-gray-600 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-600 ${
-                                !notif.is_read ? 'bg-blue-50 dark:bg-blue-900 font-medium' : 'bg-white dark:bg-gray-700'
-                            }`}
-                            onClick={() => handleNotificationClick(notif)}
+                            key={notification.id}
+                            className={`flex items-center justify-between px-4 py-3 border-b border-gray-100 last:border-b-0
+                                ${notification.is_read ? 'bg-gray-50 text-gray-600 dark:bg-gray-700 dark:text-gray-400' : 'bg-white text-gray-800 font-medium dark:bg-gray-800 dark:text-gray-200'}
+                                hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors duration-150
+                            `}
                         >
-                            <p className="text-gray-800 dark:text-gray-100 mb-1">{notif.message}</p>
-                            <p className="text-xs text-gray-500 dark:text-gray-400">{formatTimestamp(notif.created_at)}</p>
+                            <div className="flex-1 pr-2">
+                                <p className="text-sm leading-snug">{notification.message}</p>
+                                <p className="text-xs text-gray-500 mt-1 dark:text-gray-400">
+                                    {format(new Date(notification.created_at), 'dd/MM/yyyy HH:mm')}
+                                </p>
+                            </div>
+                            {!notification.is_read && (
+                                <button
+                                    onClick={() => handleMarkAsRead(notification.id)}
+                                    className="ml-2 bg-blue-500 hover:bg-blue-600 text-white text-xs px-2 py-1 rounded-full transition-colors duration-200"
+                                    title="Marcar como leída"
+                                >
+                                    Leída
+                                </button>
+                            )}
                         </div>
                     ))}
                 </div>
             )}
-            <div className="p-2 text-center border-t border-gray-200 dark:border-gray-600">
+            <div className="px-4 py-2 border-t border-gray-200 dark:border-gray-700">
                 <button
                     onClick={onClose}
-                    className="text-gray-600 dark:text-gray-300 text-sm hover:underline"
+                    className="w-full bg-gray-200 hover:bg-gray-300 text-gray-800 font-semibold py-2 rounded-md transition-colors duration-200 dark:bg-gray-700 dark:hover:bg-gray-600 dark:text-gray-200"
                 >
                     Cerrar
                 </button>

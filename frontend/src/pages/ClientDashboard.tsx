@@ -1,316 +1,413 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+// frontend/src/pages/ClientDashboard.tsx
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import api from '../config/axiosConfig';
 import { useAuth } from '../context/AuthContext';
-import { useNotification } from '../context/NotificationContext'; // <-- AÑADIDO: Importar useNotification
-import { TicketData, Notification, Department, User } from '../types'; 
-import { isAxiosErrorTypeGuard, ApiResponseError } from '../utils/typeGuards';
-import CreateTicketModal from '../components/Tickets/CreateTicketModal';
-import TicketDetailModal from '../components/Tickets/TicketDetailModal';
-import { ticketStatusTranslations, ticketPriorityTranslations } from '../utils/traslations';
-import Layout from '../components/Layout/Layout'; // Importar el componente Layout
+import { useNotification } from '../context/NotificationContext';
+import Layout from '../components/Layout/Layout';
+import TicketFormModal from '../components/Tickets/TicketFormModal';
+import FeedbackModal from '../components/Common/FeedBackModal';
+import io from 'socket.io-client';
+import { ApiResponseError, TicketData, ActivityLog, Department } from '../types';
+import { isAxiosErrorTypeGuard } from '../utils/typeGuards';
+import { ticketPriorityTranslations } from '../utils/traslations';
 
 const ClientDashboard: React.FC = () => {
-    const { user, token, signOut } = useAuth(); // <-- MODIFICADO: addNotification eliminado de useAuth
-    const { addNotification } = useNotification(); // <-- AÑADIDO: Obtener addNotification del contexto de notificaciones
+    console.log('--- RENDERIZANDO: ClientDashboard ---');
+
+    const { user, token } = useAuth();
+    const { addNotification } = useNotification();
     const navigate = useNavigate();
 
-    const [tickets, setTickets] = useState<TicketData[]>([]);
-    const [notifications, setNotifications] = useState<Notification[]>([]);
+    // Métricas de tickets por estado
+    const [totalClientTickets, setTotalClientTickets] = useState<number | null>(null);
+    const [openClientTickets, setOpenClientTickets] = useState<number | null>(null);
+    const [inProgressClientTickets, setInProgressClientTickets] = useState<number | null>(null);
+    const [closedClientTickets, setClosedClientTickets] = useState<number | null>(null);
+
+    // Métricas de tickets por prioridad
+    const [lowPriorityTickets, setLowPriorityTickets] = useState<number | null>(null);
+    const [mediumPriorityTickets, setMediumPriorityTickets] = useState<number | null>(null);
+    const [highPriorityTickets, setHighPriorityTickets] = useState<number | null>(null);
+    const [urgentPriorityTickets, setUrgentPriorityTickets] = useState<number | null>(null);
+
+    const [recentClientTickets, setRecentClientTickets] = useState<TicketData[]>([]);
+    const [departments, setDepartments] = useState<Department[]>([]);
+
+    // Estado para tickets recientemente cerrados para feedback (ahora incluye la propiedad feedback)
+    const [recentlyClosedTickets, setRecentlyClosedTickets] = useState<TicketData[]>([]);
+
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
-
     const [isCreateTicketModalOpen, setIsCreateTicketModalOpen] = useState(false);
-    const [isTicketDetailModalOpen, setIsTicketDetailModalOpen] = useState(false);
-    const [selectedTicket, setSelectedTicket] = useState<TicketData | null>(null);
+    const [isFeedbackModalOpen, setIsFeedbackModalOpen] = useState(false);
+    const [ticketToFeedback, setTicketToFeedback] = useState<TicketData | null>(null);
 
-    // Para pasar a los modales de ticket
-    const [allDepartments, setAllDepartments] = useState<Department[]>([]);
-    const [allUsers, setAllUsers] = useState<User[]>([]);
+    const socket = useRef<any>(null);
 
-    const fetchClientData = useCallback(async () => {
+    const fetchClientDashboardData = useCallback(async () => {
+        if (!token || !user?.id) {
+            setLoading(false);
+            return;
+        }
         setLoading(true);
         setError(null);
         try {
-            if (!token || !user) {
-                throw new Error('No autorizado. Token o usuario no disponible.');
-            }
-
-            // Fetch tickets for the current user
-            const ticketsResponse = await api.get('/api/tickets', {
-                headers: { Authorization: `Bearer ${token}` },
-            });
-            setTickets(ticketsResponse.data.tickets || []);
-
-            // Fetch notifications for the current user
-            const notificationsResponse = await api.get('/api/notifications', {
-                headers: { Authorization: `Bearer ${token}` },
-            });
-            setNotifications(notificationsResponse.data.notifications || []);
-
-            // Fetch departments and users for modals
-            const [departmentsRes, usersRes] = await Promise.all([
-                api.get('/api/departments', { headers: { Authorization: `Bearer ${token}` } }),
-                api.get('/api/users', { headers: { Authorization: `Bearer ${token}` } }),
+            const [
+                totalTicketsRes,
+                openTicketsRes,
+                inProgressTicketsRes,
+                closedTicketsRes,
+                lowPriorityRes,
+                mediumPriorityRes,
+                highPriorityRes,
+                urgentPriorityRes,
+                recentTicketsRes,
+                departmentsRes,
+                // NUEVO: Obtener tickets resueltos o cerrados, ordenados por fecha de cierre,
+                // y que NO tengan feedback aún. Limitamos a 3 para la sección del dashboard.
+                recentlyClosedForFeedbackRes
+            ] = await Promise.all([
+                api.get<{ success: boolean; count: number; data: TicketData[] }>(`/api/tickets?user_id=${user.id}`, { headers: { Authorization: `Bearer ${token}` } }),
+                api.get<{ success: boolean; count: number; data: TicketData[] }>(`/api/tickets?user_id=${user.id}&status=open`, { headers: { Authorization: `Bearer ${token}` } }),
+                api.get<{ success: boolean; count: number; data: TicketData[] }>(`/api/tickets?user_id=${user.id}&status=in-progress`, { headers: { Authorization: `Bearer ${token}` } }),
+                api.get<{ success: boolean; count: number; data: TicketData[] }>(`/api/tickets?user_id=${user.id}&status=resolved,closed`, { headers: { Authorization: `Bearer ${token}` } }),
+                api.get<{ success: boolean; count: number; data: TicketData[] }>(`/api/tickets?user_id=${user.id}&priority=low`, { headers: { Authorization: `Bearer ${token}` } }),
+                api.get<{ success: boolean; count: number; data: TicketData[] }>(`/api/tickets?user_id=${user.id}&priority=medium`, { headers: { Authorization: `Bearer ${token}` } }),
+                api.get<{ success: boolean; count: number; data: TicketData[] }>(`/api/tickets?user_id=${user.id}&priority=high`, { headers: { Authorization: `Bearer ${token}` } }),
+                api.get<{ success: boolean; count: number; data: TicketData[] }>(`/api/tickets?user_id=${user.id}&priority=urgent`, { headers: { Authorization: `Bearer ${token}` } }),
+                api.get<{ success: boolean; data: TicketData[] }>(`/api/tickets?user_id=${user.id}&limit=5`, { headers: { Authorization: `Bearer ${token}` } }),
+                api.get<{ success: boolean; data: Department[] }>('/api/departments', { headers: { Authorization: `Bearer ${token}` } }),
+                // Asumiendo que el backend puede filtrar por 'has_feedback=false' o que la respuesta incluye el objeto 'feedback'
+                // y luego filtramos en el frontend. La opción más robusta es que el backend lo filtre.
+                // Por ahora, traemos todos los cerrados/resueltos y filtramos en frontend.
+                api.get<{ success: boolean; data: TicketData[] }>(`/api/tickets?user_id=${user.id}&status=resolved,closed&sort_by=closed_at&sort_order=DESC&limit=5`, { headers: { Authorization: `Bearer ${token}` } }),
             ]);
-            setAllDepartments(departmentsRes.data.departments || []);
-            setAllUsers(usersRes.data.users || []); 
+
+            setTotalClientTickets(totalTicketsRes.data.count);
+            setOpenClientTickets(openTicketsRes.data.count);
+            setInProgressClientTickets(inProgressTicketsRes.data.count);
+            setClosedClientTickets(closedTicketsRes.data.count);
+
+            setLowPriorityTickets(lowPriorityRes.data.count);
+            setMediumPriorityTickets(mediumPriorityRes.data.count);
+            setHighPriorityTickets(highPriorityRes.data.count);
+            setUrgentPriorityTickets(urgentPriorityRes.data.count);
+
+            setRecentClientTickets(Array.isArray(recentTicketsRes.data.data) ? recentTicketsRes.data.data : []);
+            setDepartments(Array.isArray(departmentsRes.data.data) ? departmentsRes.data.data : []);
+
+            // Filtrar tickets que no tienen feedback (si el backend no lo hace)
+            const ticketsWithoutFeedback = (Array.isArray(recentlyClosedForFeedbackRes.data.data) ? recentlyClosedForFeedbackRes.data.data : [])
+                                            .filter(ticket => !ticket.feedback)
+                                            .slice(0, 3); // Limitar a 3 si hay muchos
+            setRecentlyClosedTickets(ticketsWithoutFeedback);
 
         } catch (err: unknown) {
+            console.error('Error fetching client dashboard data:', err);
             if (isAxiosErrorTypeGuard(err)) {
                 const apiError = err.response?.data as ApiResponseError;
-                setError(apiError?.message || 'Error al cargar datos del dashboard.');
-                addNotification(`Error al cargar datos: ${apiError?.message || 'Error desconocido'}`, 'error');
-                if (err.response?.status === 401) signOut();
+                setError(apiError?.message || 'Error al cargar los datos del dashboard de cliente.');
+                addNotification(`Error al cargar dashboard de cliente: ${apiError?.message || 'Error desconocido'}`, 'error');
             } else {
-                setError('Ocurrió un error inesperado al cargar los datos.');
+                setError('Ocurrió un error inesperado al cargar el dashboard de cliente.');
+                addNotification('Ocurrió un error inesperado al cargar el dashboard de cliente.', 'error');
             }
-            console.error('Error fetching client dashboard data:', err);
         } finally {
             setLoading(false);
         }
-    }, [token, user, addNotification, signOut]);
+    }, [token, user?.id, addNotification]);
 
     useEffect(() => {
-        if (user && user.role === 'client') {
-            fetchClientData();
-        } else if (user && user.role !== 'client') {
-            addNotification('Acceso denegado. Solo clientes pueden acceder a este panel.', 'error');
-            navigate('/admin-dashboard'); 
+        if (user && token && user.role === 'client') {
+            fetchClientDashboardData();
         }
-    }, [user, fetchClientData, navigate, addNotification]);
+    }, [user, token, fetchClientDashboardData]);
 
-    const handleCreateTicket = useCallback(() => {
+    useEffect(() => {
+        if (user && token && user.role === 'client' && !socket.current) {
+            socket.current = io(process.env.REACT_APP_API_URL || 'http://localhost:5000', {
+                auth: { token: token }
+            });
+
+            socket.current.on('connect', () => {
+                console.log('Conectado a Socket.IO (Client Dashboard)');
+                socket.current.emit('joinRoom', { roomName: `user-${user.id}`, userId: user.id });
+                socket.current.emit('joinRoom', { roomName: user.role, userId: user.id });
+            });
+
+            socket.current.on('ticketUpdated', (data: any) => {
+                addNotification(data.message, 'info');
+                fetchClientDashboardData();
+            });
+
+            socket.current.on('newComment', (data: any) => {
+                addNotification(data.message, 'info');
+                fetchClientDashboardData();
+            });
+
+            socket.current.on('activityLogged', (data: any) => {
+                addNotification(data.message, 'info');
+                fetchClientDashboardData();
+            });
+
+            socket.current.on('disconnect', () => {
+                console.log('Desconectado de Socket.IO (Client Dashboard)');
+            });
+
+            socket.current.on('connect_error', (err: any) => {
+                console.error('Socket.IO connection error (Client Dashboard):', err.message);
+                addNotification(`Error de conexión con el servidor de notificaciones: ${err.message}`, 'error');
+            });
+
+            return () => {
+                if (socket.current) {
+                    console.log('Desconectado de Socket.IO');
+                    socket.current.disconnect();
+                    socket.current = null;
+                }
+            };
+        }
+    }, [user, token, addNotification, fetchClientDashboardData]);
+
+    const handleCreateTicketClick = () => {
         setIsCreateTicketModalOpen(true);
-    }, []);
+    };
 
-    const handleTicketCreatedOrUpdated = useCallback(() => {
-        setIsCreateTicketModalOpen(false);
-        setIsTicketDetailModalOpen(false); 
-        fetchClientData(); 
-    }, [fetchClientData]);
-
-    const handleViewTicket = useCallback((ticket: TicketData) => {
-        setSelectedTicket(ticket);
-        setIsTicketDetailModalOpen(true);
-    }, []);
-
-    const handleCloseTicketDetailModal = useCallback(() => {
-        setIsTicketDetailModalOpen(false);
-        setSelectedTicket(null);
-    }, []);
-
-    const handleMarkNotificationAsRead = useCallback(async (notificationId: number) => {
+    const handleSaveTicket = async (ticketData: any) => {
         try {
-            if (!token) {
-                addNotification('No autorizado para marcar notificaciones.', 'error');
-                return;
-            }
-            await api.put(`/api/notifications/${notificationId}/read`, {}, {
+            await api.post('/api/tickets', { ...ticketData, user_id: user?.id }, {
                 headers: { Authorization: `Bearer ${token}` },
             });
-            addNotification('Notificación marcada como leída.', 'success');
-            fetchClientData(); 
+            addNotification('Ticket creado exitosamente.', 'success');
+            setIsCreateTicketModalOpen(false);
+            fetchClientDashboardData();
         } catch (err: unknown) {
+            console.error('Error saving ticket:', err);
             if (isAxiosErrorTypeGuard(err)) {
                 const apiError = err.response?.data as ApiResponseError;
-                addNotification(`Error al marcar notificación: ${apiError?.message || 'Error desconocido'}`, 'error');
+                addNotification(`Error al crear ticket: ${apiError?.message || 'Error desconocido'}`, 'error');
             } else {
-                addNotification('Ocurrió un error inesperado al marcar la notificación.', 'error');
+                addNotification('Ocurrió un error inesperado al crear el ticket.', 'error');
             }
-            console.error('Error marking notification as read:', err);
         }
-    }, [token, addNotification, fetchClientData]);
+    };
 
-    const handleDeleteNotification = useCallback(async (notificationId: number) => {
-        // IMPORTANT: Never use confirm() or alert() in the code.
-        // Instead, use a custom modal UI for these.
-        // For now, I'll remove the confirm() call to allow the code to run,
-        // but you should implement a proper modal for user confirmation.
-        // const confirmed = window.confirm('¿Estás seguro de que quieres eliminar esta notificación?'); 
-        // if (!confirmed) return;
+    const handleOpenFeedbackModal = (ticket: TicketData) => {
+        setTicketToFeedback(ticket);
+        setIsFeedbackModalOpen(true);
+    };
 
-        addNotification('Eliminando notificación...', 'info');
-
+    // FUNCIÓN ACTUALIZADA PARA ENVIAR EL FEEDBACK AL BACKEND
+    const handleSaveFeedback = async (ticketId: number, rating: number, comment: string) => {
+        if (!token || !user?.id) {
+            addNotification('No estás autenticado para enviar feedback.', 'error');
+            return;
+        }
         try {
-            if (!token) {
-                addNotification('No autorizado para eliminar notificaciones.', 'error');
-                return;
-            }
-            await api.delete(`/api/notifications/${notificationId}`, {
+            // Asumiendo un endpoint POST /api/feedback para guardar el feedback
+            await api.post('/api/feedback', {
+                ticket_id: ticketId,
+                user_id: user.id, // ID del cliente que deja el feedback
+                rating: rating,
+                comment: comment,
+            }, {
                 headers: { Authorization: `Bearer ${token}` },
             });
-            addNotification('Notificación eliminada exitosamente.', 'success');
-            fetchClientData(); 
+            addNotification('¡Gracias por tu feedback!', 'success');
+            setIsFeedbackModalOpen(false);
+            setTicketToFeedback(null);
+            fetchClientDashboardData(); // Recargar para que el ticket ya no aparezca en la lista de feedback pendiente
         } catch (err: unknown) {
+            console.error('Error submitting feedback:', err);
             if (isAxiosErrorTypeGuard(err)) {
                 const apiError = err.response?.data as ApiResponseError;
-                addNotification(`Error al eliminar notificación: ${apiError?.message || 'Error desconocido'}`, 'error');
+                addNotification(`Error al enviar feedback: ${apiError?.message || 'Error desconocido'}`, 'error');
             } else {
-                addNotification('Ocurrió un error inesperado al eliminar la notificación.', 'error');
+                addNotification('Ocurrió un error inesperado al enviar el feedback.', 'error');
             }
-            console.error('Error deleting notification:', err);
         }
-    }, [token, addNotification, fetchClientData]);
+    };
 
+
+    if (!user || user.role !== 'client') {
+        return <Layout><div className="text-center p-4 text-red-500">Acceso denegado. Solo clientes pueden ver esta página.</div></Layout>;
+    }
 
     if (loading) {
-        return (
-            <div className="flex justify-center items-center h-screen bg-gray-100">
-                <p className="text-gray-700 text-lg">Cargando dashboard de cliente...</p>
-            </div>
-        );
+        return <Layout><div className="flex justify-center items-center h-full"><span className="text-lg">Cargando dashboard de cliente...</span></div></Layout>;
     }
 
     if (error) {
-        return (
-            <div className="text-center p-8 text-red-500 bg-white rounded-lg shadow-lg m-4">
-                <h2 className="text-2xl font-bold mb-4">Error al cargar el Dashboard del Cliente</h2>
-                <p>{error}</p>
-                <button onClick={fetchClientData} className="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded mt-4">Reintentar</button>
-            </div>
-        );
-    }
-
-    if (user?.role !== 'client') {
-        return null; 
+        return <Layout><div className="text-red-500 text-center p-4">Error: {error}</div></Layout>;
     }
 
     return (
-        <Layout> {/* Envuelve todo el contenido en el componente Layout */}
-            <div className="client-dashboard p-4 md:p-8 bg-gray-100 min-h-screen">
-                <h1 className="text-3xl font-bold text-gray-800 mb-8 text-center">Bienvenido, {user?.username}!</h1>
-
-                {/* Resumen de Tickets */}
-                <div className="summary-section bg-white p-6 rounded-lg shadow-lg mb-8">
-                    <h2 className="text-2xl font-bold text-gray-800 mb-4">Mis Tickets</h2>
-                    <div className="flex justify-end mb-4">
-                        <button onClick={handleCreateTicket} className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-md transition-colors duration-200">
-                            Crear Nuevo Ticket
-                        </button>
-                    </div>
-                    {tickets.length > 0 ? (
-                        <div className="overflow-x-auto">
-                            <table className="min-w-full divide-y divide-gray-200">
-                                <thead className="bg-gray-50">
-                                    <tr>
-                                        <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">ID</th>
-                                        <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Asunto</th>
-                                        <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Estado</th>
-                                        <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Prioridad</th>
-                                        <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Asignado a</th>
-                                        <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Acciones</th>
-                                    </tr>
-                                </thead>
-                                <tbody className="bg-white divide-y divide-gray-200">
-                                    {tickets.map((ticket) => (
-                                        <tr key={ticket.id}>
-                                            <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{ticket.id}</td>
-                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{ticket.title}</td> {/* CORREGIDO: 'subject' -> 'title' */}
-                                            <td className="px-6 py-4 whitespace-nowrap text-sm">
-                                                <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full 
-                                                    ${ticket.status === 'open' ? 'bg-blue-100 text-blue-800' : ''}
-                                                    ${ticket.status === 'in-progress' ? 'bg-yellow-100 text-yellow-800' : ''}
-                                                    ${ticket.status === 'resolved' ? 'bg-green-100 text-green-800' : ''} {/* Ya está corregido en types.ts */}
-                                                    ${ticket.status === 'closed' ? 'bg-gray-100 text-gray-800' : ''}
-                                                `}>
-                                                    {ticketStatusTranslations[ticket.status] || ticket.status}
-                                                </span>
-                                            </td>
-                                            <td className="px-6 py-4 whitespace-nowrap text-sm">
-                                                <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full 
-                                                    ${ticket.priority === 'low' ? 'bg-green-100 text-green-800' : ''}
-                                                    ${ticket.priority === 'medium' ? 'bg-yellow-100 text-yellow-800' : ''}
-                                                    ${ticket.priority === 'high' ? 'bg-red-100 text-red-800' : ''}
-                                                `}>
-                                                    {ticketPriorityTranslations[ticket.priority] || ticket.priority}
-                                                </span>
-                                            </td>
-                                            <td>{ticket.agent_username || 'N/A'}</td> 
-                                            <td>
-                                                <button
-                                                    onClick={() => handleViewTicket(ticket)}
-                                                    className="text-indigo-600 hover:text-indigo-900"
-                                                >
-                                                    Ver Detalles
-                                                </button>
-                                            </td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                        </div>
-                    ) : (
-                        <p className="text-gray-700">No tienes tickets registrados. ¡Crea uno nuevo!</p>
-                    )}
+        <Layout>
+            <div className="container mx-auto p-4 sm:p-6 lg:p-8 bg-gray-50 min-h-screen">
+                <div className="flex justify-between items-center mb-6">
+                    <h1 className="text-3xl font-bold text-gray-800">Mi Dashboard</h1>
+                    <button
+                        onClick={handleCreateTicketClick}
+                        className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg shadow-md transition duration-300 ease-in-out transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-75"
+                    >
+                        Crear Nuevo Ticket
+                    </button>
                 </div>
 
-                {/* Notificaciones */}
-                <div className="notifications-section bg-white p-6 rounded-lg shadow-lg mt-8">
-                    <h2 className="text-2xl font-bold text-gray-800 mb-4">Mis Notificaciones</h2>
-                    {notifications.length > 0 ? (
-                        <div className="space-y-4">
-                            {notifications.map((notification) => (
-                                <div key={notification.id} className="bg-gray-50 p-4 rounded-lg shadow-sm flex items-center justify-between">
-                                    <div>
-                                        <p className="text-gray-700">{notification.message}</p>
-                                        <p className="text-sm text-gray-500">
-                                            {new Date(notification.created_at).toLocaleString()}
-                                            {notification.is_read ? ' (Leída)' : ' (No Leída)'}
-                                        </p>
-                                    </div>
-                                    <div>
-                                        {!notification.is_read && (
+                {/* Resumen de Tickets del Cliente por Estado */}
+                <h2 className="text-2xl font-bold text-gray-800 mb-4 border-b pb-2">Tickets por Estado</h2>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+                    <div className="bg-white p-6 rounded-lg shadow-md flex items-center justify-between">
+                        <div>
+                            <p className="text-gray-500 text-sm">Mis Tickets Totales</p>
+                            <p className="text-3xl font-bold text-gray-900">{totalClientTickets}</p>
+                        </div>
+                        <svg className="w-10 h-10 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 5v2m0 4v2m0 4v2M12 5a3 3 0 110 6 3 3 0 010-6zm0 6a3 3 0 110 6 3 3 0 010-6zm0 6a3 3 0 110 6 3 3 0 010-6z"></path></svg>
+                    </div>
+                    <div className="bg-white p-6 rounded-lg shadow-md flex items-center justify-between">
+                        <div>
+                            <p className="text-gray-500 text-sm">Tickets Abiertos</p>
+                            <p className="text-3xl font-bold text-blue-600">{openClientTickets}</p>
+                        </div>
+                        <svg className="w-10 h-10 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                    </div>
+                    <div className="bg-white p-6 rounded-lg shadow-md flex items-center justify-between">
+                        <div>
+                            <p className="text-gray-500 text-sm">Tickets En Progreso</p>
+                            <p className="text-3xl font-bold text-yellow-600">{inProgressClientTickets}</p>
+                        </div>
+                        <svg className="w-10 h-10 text-yellow-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                    </div>
+                    <div className="bg-white p-6 rounded-lg shadow-md flex items-center justify-between">
+                        <div>
+                            <p className="text-gray-500 text-sm">Tickets Resueltos/Cerrados</p>
+                            <p className="text-3xl font-bold text-green-600">{closedClientTickets}</p>
+                        </div>
+                        <svg className="w-10 h-10 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                    </div>
+                </div>
+
+                {/* Resumen de Tickets del Cliente por Prioridad */}
+                <h2 className="text-2xl font-bold text-gray-800 mb-4 border-b pb-2">Tickets por Prioridad</h2>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+                    <div className="bg-white p-6 rounded-lg shadow-md flex items-center justify-between">
+                        <div>
+                            <p className="text-gray-500 text-sm">Prioridad Baja</p>
+                            <p className="text-3xl font-bold text-green-600">{lowPriorityTickets}</p>
+                        </div>
+                        <span className="w-10 h-10 flex items-center justify-center text-green-500 text-4xl">↓</span>
+                    </div>
+                    <div className="bg-white p-6 rounded-lg shadow-md flex items-center justify-between">
+                        <div>
+                            <p className="text-gray-500 text-sm">Prioridad Media</p>
+                            <p className="text-3xl font-bold text-yellow-600">{mediumPriorityTickets}</p>
+                        </div>
+                        <span className="w-10 h-10 flex items-center justify-center text-yellow-500 text-4xl">↔</span>
+                    </div>
+                    <div className="bg-white p-6 rounded-lg shadow-md flex items-center justify-between">
+                        <div>
+                            <p className="text-gray-500 text-sm">Prioridad Alta</p>
+                            <p className="text-3xl font-bold text-orange-600">{highPriorityTickets}</p>
+                        </div>
+                        <span className="w-10 h-10 flex items-center justify-center text-orange-500 text-4xl">↑</span>
+                    </div>
+                    <div className="bg-white p-6 rounded-lg shadow-md flex items-center justify-between">
+                        <div>
+                            <p className="text-gray-500 text-sm">Prioridad Urgente</p>
+                            <p className="text-3xl font-bold text-red-600">{urgentPriorityTickets}</p>
+                        </div>
+                        <span className="w-10 h-10 flex items-center justify-center text-red-500 text-4xl">❗</span>
+                    </div>
+                </div>
+
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    {/* Mis Tickets Recientes */}
+                    <div className="bg-white p-6 rounded-lg shadow-md">
+                        <h2 className="text-xl font-bold text-gray-800 mb-4 border-b pb-2">Mis Tickets Recientes</h2>
+                        {recentClientTickets.length === 0 ? (
+                            <p className="text-gray-600">No tienes tickets recientes.</p>
+                        ) : (
+                            <ul className="divide-y divide-gray-200">
+                                {recentClientTickets.map(ticket => (
+                                    <li key={ticket.id} className="py-3 flex justify-between items-center">
+                                        <div>
+                                            <p className="text-lg font-semibold text-gray-900">{ticket.title}</p>
+                                            <p className="text-sm text-gray-600">Estado: {ticket.status} | Prioridad: {ticket.priority}</p>
+                                        </div>
+                                        <button
+                                            onClick={() => navigate(`/client/tickets/${ticket.id}`)}
+                                            className="text-indigo-600 hover:text-indigo-900 text-sm font-medium"
+                                        >
+                                            Ver
+                                        </button>
+                                    </li>
+                                ))}
+                            </ul>
+                        )}
+                        {totalClientTickets !== null && totalClientTickets > recentClientTickets.length && (
+                            <div className="text-center mt-4">
+                                <button
+                                    onClick={() => navigate('/client/tickets')}
+                                    className="text-blue-600 hover:text-blue-800 font-medium"
+                                >
+                                    Ver Todos Mis Tickets
+                                </button>
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Califica tu Experiencia Reciente (Ahora con prevención de re-calificación) */}
+                    <div className="bg-white p-6 rounded-lg shadow-md">
+                        <h2 className="text-xl font-bold text-gray-800 mb-4 border-b pb-2">Califica tu Experiencia Reciente</h2>
+                        {recentlyClosedTickets.length === 0 ? (
+                            <p className="text-gray-600">No hay tickets cerrados recientemente para calificar.</p>
+                        ) : (
+                            <ul className="divide-y divide-gray-200">
+                                {recentlyClosedTickets.map(ticket => (
+                                    <li key={ticket.id} className="py-3 flex justify-between items-center">
+                                        <div>
+                                            <p className="text-lg font-semibold text-gray-900">Ticket #{ticket.id}: {ticket.title}</p>
+                                            <p className="text-sm text-gray-600">Cerrado el: {ticket.closed_at ? new Date(ticket.closed_at).toLocaleDateString() : 'N/A'}</p>
+                                        </div>
+                                        {/* Condicional para mostrar el botón "Calificar" */}
+                                        {ticket.feedback ? (
+                                            <span className="text-green-600 font-semibold text-sm">Calificado ({ticket.feedback.rating}/5) ✅</span>
+                                        ) : (
                                             <button
-                                                onClick={() => handleMarkNotificationAsRead(notification.id)}
-                                                className="bg-blue-500 hover:bg-blue-600 text-white font-bold py-1 px-3 rounded-md text-sm mr-2 transition-colors duration-200"
-                                                title="Marcar como leída"
+                                                onClick={() => handleOpenFeedbackModal(ticket)}
+                                                className="bg-purple-600 hover:bg-purple-700 text-white font-bold py-1 px-3 rounded-lg shadow-md text-sm transition duration-300 ease-in-out"
                                             >
-                                                Marcar Leída
+                                                Calificar
                                             </button>
                                         )}
-                                        <button
-                                            onClick={() => handleDeleteNotification(notification.id)}
-                                            className="p-2 rounded-full text-red-500 hover:bg-red-100 transition-colors duration-200"
-                                            title="Eliminar notificación"
-                                        >
-                                            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor" viewBox="0 0 16 16">
-                                                <path d="M6.5 1h3a.5.5 0 0 1 .5.5v1H6v-1a.5.5 0 0 1 .5-.5ZM11 2.5v-1A1.5 1.5 0 0 0 9.5 0h-3A1.5 1.5 0 0 0 5 1.5v1H2.5a.5.5 0 0 0 0 1h.5V14a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V3.5h.5a.5.5 0 0 0 0-1h-2.5ZM4 1.5a.5.5 0 0 1 .5-.5h7a.5.5 0 0 1 .5.5v1H4v-1ZM13 3.5v10a1 1 0 0 1-1 1h-8a1 1 0 0 1-1-1V3.5h10Z"/>
-                                            </svg>
-                                        </button>
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-                    ) : (
-                        <p className="text-gray-700">No hay notificaciones disponibles.</p>
-                    )}
+                                    </li>
+                                ))}
+                            </ul>
+                        )}
+                    </div>
                 </div>
-
-                {/* Modales */}
-                {isCreateTicketModalOpen && (
-                    <CreateTicketModal
-                        isOpen={isCreateTicketModalOpen}
-                        onClose={() => setIsCreateTicketModalOpen(false)}
-                        onTicketCreated={handleTicketCreatedOrUpdated}
-                        token={token}
-                        departments={allDepartments}
-                        users={allUsers}
-                    />
-                )}
-
-                {isTicketDetailModalOpen && selectedTicket && (
-                    <TicketDetailModal
-                        isOpen={isTicketDetailModalOpen}
-                        onClose={handleCloseTicketDetailModal}
-                        ticket={selectedTicket}
-                        onTicketUpdated={handleTicketCreatedOrUpdated}
-                        token={token}
-                        departments={allDepartments}
-                        users={allUsers}
-                    />
-                )}
             </div>
+
+            {isCreateTicketModalOpen && (
+                <TicketFormModal
+                    isOpen={isCreateTicketModalOpen}
+                    onClose={() => setIsCreateTicketModalOpen(false)}
+                    onSave={handleSaveTicket}
+                    initialData={null}
+                    departments={departments}
+                    users={[]}
+                />
+            )}
+
+            {isFeedbackModalOpen && ticketToFeedback && (
+                <FeedbackModal
+                    isOpen={isFeedbackModalOpen}
+                    onClose={() => setIsFeedbackModalOpen(false)}
+                    ticket={ticketToFeedback}
+                    onSaveFeedback={handleSaveFeedback}
+                />
+            )}
         </Layout>
     );
 };

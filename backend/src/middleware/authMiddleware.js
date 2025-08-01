@@ -1,36 +1,38 @@
 // backend/src/middleware/authMiddleware.js
 const jwt = require('jsonwebtoken');
 const asyncHandler = require('express-async-handler');
-const pool = require('../config/db'); // Asume que tienes un archivo db.js en config
+const pool = require('../config/db');
 
-// Middleware para proteger rutas
-const protect = asyncHandler(async (req, res, next) => {
+// Middleware para proteger rutas, renombrado de 'protect' a 'authenticateToken'
+const authenticateToken = asyncHandler(async (req, res, next) => { // <-- ¡CAMBIO AQUÍ!
     let token;
 
-    // Verificar si el token está en los headers de autorización (Bearer Token)
     if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
         try {
-            // Obtener token del header
             token = req.headers.authorization.split(' ')[1];
+            // console.log(`[AuthMiddleware - AuthenticateToken] Token recibido: ${token}`); // Descomentar para depuración
 
-            // Verificar token
             const decoded = jwt.verify(token, process.env.JWT_SECRET);
+            // console.log(`[AuthMiddleware - AuthenticateToken] Token decodificado:`, decoded); // Descomentar para depuración
 
-            // Obtener el usuario del token
-            const [rows] = await pool.query('SELECT id, username, email, role FROM users WHERE id = ?', [decoded.id]);
+            const [rows] = await pool.execute('SELECT id, username, email, role, department_id FROM users WHERE id = ?', [decoded.id]);
+            req.user = rows[0];
 
-            if (rows.length === 0) {
+            if (!req.user) {
                 res.status(401);
                 throw new Error('No autorizado, usuario no encontrado');
             }
-
-            req.user = rows[0]; // Adjuntar el usuario a la solicitud
+            // console.log(`[AuthMiddleware - AuthenticateToken] Usuario autenticado: ${req.user.username} (ID: ${req.user.id}, Rol: ${req.user.role})`); // Descomentar para depuración
             next();
-
         } catch (error) {
-            console.error('Error en el middleware de autenticación:', error);
-            res.status(401);
-            throw new Error('No autorizado, token fallido');
+            console.error('[AuthMiddleware - AuthenticateToken] Error en la verificación del token:', error.message);
+            if (error.name === 'TokenExpiredError') {
+                res.status(401);
+                throw new Error('No autorizado, token ha expirado');
+            } else {
+                res.status(401);
+                throw new Error('No autorizado, token fallido');
+            }
         }
     }
 
@@ -40,24 +42,38 @@ const protect = asyncHandler(async (req, res, next) => {
     }
 });
 
-// Middleware para autorización basada en roles
-const authorize = (roles = []) => {
-    // roles puede ser un string o un array de strings
-    if (typeof roles === 'string') {
-        roles = [roles];
-    }
-
+// Middleware para autorizar roles
+const authorize = (roles) => {
     return (req, res, next) => {
         if (!req.user) {
+            console.log('[AuthMiddleware - Authorize] No hay usuario en la solicitud. Acceso denegado.');
             res.status(401);
             throw new Error('No autorizado, usuario no autenticado');
         }
-        if (roles.length > 0 && !roles.includes(req.user.role)) {
-            res.status(403);
-            throw new Error('Acceso denegado, no tienes los permisos necesarios');
+
+        const rolesString = Array.isArray(roles) ? roles.join(', ') : String(roles);
+        // console.log(`[AuthMiddleware - Authorize] Verificando rol del usuario: ${req.user.role}. Roles permitidos: ${rolesString}`); // Descomentar para depuración
+
+        // Si el usuario es un administrador, siempre tiene acceso
+        if (req.user.role === 'admin') {
+            // console.log('[AuthMiddleware - Authorize] Autorizado: Usuario es administrador.'); // Descomentar para depuración
+            return next();
         }
-        next();
+
+        // Si el rol del usuario está en la lista de roles permitidos
+        if (Array.isArray(roles) && roles.includes(req.user.role)) {
+            // console.log('[AuthMiddleware - Authorize] Autorizado: Rol coincide.'); // Descomentar para depuración
+            return next();
+        } else if (!Array.isArray(roles) && roles === req.user.role) { // Si se pasó un solo string de rol
+            // console.log('[AuthMiddleware - Authorize] Autorizado: Rol coincide (string).'); // Descomentar para depuración
+            return next();
+        }
+
+        console.log('[AuthMiddleware - Authorize] Acceso denegado. Rol no autorizado o no cumple las condiciones.');
+        res.status(403);
+        throw new Error('No autorizado para acceder a esta ruta');
     };
 };
 
-module.exports = { protect, authorize };
+// Exporta ambas funciones, ahora 'authenticateToken' está disponible
+module.exports = { authenticateToken, authorize }; // <-- ¡CAMBIO AQUÍ!

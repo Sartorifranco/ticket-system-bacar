@@ -1,166 +1,248 @@
 // frontend/src/context/NotificationContext.tsx
-import React, { createContext, useContext, useState, useEffect, useCallback, useMemo, ReactNode } from 'react';
+import React, { createContext, useState, useContext, ReactNode, useCallback, useEffect, useRef } from 'react';
+// Importar Notification (para el estado de notificaciones del backend) y Toast (para el estado de toasts del frontend)
+import { Notification, Toast, ToastNotificationType, BackendNotificationType } from '../types';
 import api from '../config/axiosConfig';
-import { useAuth } from './AuthContext'; // Import useAuth to get the token
 import { isAxiosErrorTypeGuard, ApiResponseError } from '../utils/typeGuards';
-import { Notification } from '../types'; // Assuming Notification type is defined here or imported
+import { useAuth } from './AuthContext';
+
+// Este tipo es para la función addNotification que crea toasts
+type AddNotificationType = ToastNotificationType;
 
 interface NotificationContextType {
-    notifications: Notification[];
-    unreadCount: number;
-    addNotification: (message: string, type: 'success' | 'error' | 'warning' | 'info') => void;
+    notifications: Notification[]; // Lista de notificaciones del backend
+    toasts: Toast[]; // Lista de toasts del frontend
+    addNotification: (message: string, type: AddNotificationType, relatedId?: number | null, relatedType?: string | null) => void;
+    removeToast: (id: number | string) => void; // id puede ser number o string
+    fetchNotifications: () => Promise<void>;
     markNotificationAsRead: (notificationId: number) => Promise<void>;
+    deleteNotification: (notificationId: number) => Promise<void>;
     markAllNotificationsAsRead: () => Promise<void>;
-    fetchNotifications: () => Promise<void>; // Add fetchNotifications to the context type
-    fetchUnreadCount: () => Promise<void>; // Add fetchUnreadCount to the context type
+    deleteAllNotifications: () => Promise<void>;
+    unreadNotificationsCount: number;
 }
 
 const NotificationContext = createContext<NotificationContextType | undefined>(undefined);
 
 export const NotificationProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-    const { token, user } = useAuth(); // Get token and user from AuthContext
     const [notifications, setNotifications] = useState<Notification[]>([]);
-    const [unreadCount, setUnreadCount] = useState<number>(0);
-    const [notificationQueue, setNotificationQueue] = useState<{ message: string; type: 'success' | 'error' | 'warning' | 'info'; id: number }[]>([]);
-    const [nextNotificationId, setNextNotificationId] = useState(0);
+    const [toasts, setToasts] = useState<Toast[]>([]);
+    const [unreadNotificationsCount, setUnreadNotificationsCount] = useState(0);
 
-    // Function to add a notification to the queue (for toast-like messages)
-    const addNotification = useCallback((message: string, type: 'success' | 'error' | 'warning' | 'info') => {
-        setNotificationQueue(prev => [...prev, { message, type, id: nextNotificationId }]);
-        setNextNotificationId(prev => prev + 1);
-    }, [nextNotificationId]);
+    const { token, isAuthenticated, user } = useAuth();
+    const tokenRef = useRef(token);
+    const userRef = useRef(user);
 
-    // Function to remove a notification from the queue after it's displayed
-    const removeNotification = useCallback((id: number) => {
-        setNotificationQueue(prev => prev.filter(notif => notif.id !== id));
+    useEffect(() => {
+        tokenRef.current = token;
+        userRef.current = user;
+    }, [token, user]);
+
+    // Función para eliminar un toast
+    // MOVIDO: removeToast antes de addNotification para resolver el error de declaración
+    const removeToast = useCallback((id: number | string) => {
+        setToasts((prevToasts) => {
+            const toastToRemove = prevToasts.find(toast => toast.id === id);
+            if (toastToRemove?.timeoutId) {
+                clearTimeout(toastToRemove.timeoutId);
+            }
+            return prevToasts.filter((toast) => toast.id !== id);
+        });
     }, []);
 
-    // Function to fetch only the unread count (for the bell icon)
-    // MODIFICADO: addNotification añadido a las dependencias
-    const fetchUnreadCount = useCallback(async () => {
-        if (!token) {
-            setUnreadCount(0);
-            return;
-        }
-        try {
-            const response = await api.get('/api/notifications/unread-count', {
-                headers: { Authorization: `Bearer ${token}` },
-            });
-            setUnreadCount(response.data.count);
-        } catch (err) {
-            console.error('Error fetching unread notifications count:', err);
-            addNotification('Error al cargar el contador de notificaciones no leídas.', 'error'); // Usa addNotification aquí
-            setUnreadCount(0);
-        }
-    }, [token, addNotification]); // <-- AÑADIDO: addNotification como dependencia
+    // Función para añadir un toast (mensaje temporal en el frontend)
+    const addNotification = useCallback((message: string, type: AddNotificationType, relatedId: number | null = null, relatedType: string | null = null) => {
+        const id = Date.now() + Math.random().toString(36).substring(2, 9);
+        const userIdForToast = userRef.current?.id;
 
-    // Function to fetch all notifications for the current user
-    // MODIFICADO: addNotification añadido a las dependencias
+        const newToast: Toast = {
+            id: id,
+            message,
+            type,
+            user_id: userIdForToast,
+            created_at: new Date().toISOString(),
+            target_id: relatedId,
+            related_id: relatedId,
+            related_type: relatedType,
+        };
+
+        setToasts((prevToasts) => [...prevToasts, newToast]);
+
+        const timeoutId = setTimeout(() => {
+            removeToast(id); // removeToast ya está declarado
+        }, 5000);
+        newToast.timeoutId = timeoutId;
+    }, [removeToast]); // removeToast es una dependencia aquí
+
+    // Función para obtener notificaciones del backend
     const fetchNotifications = useCallback(async () => {
-        if (!token) {
+        // Solo intentar buscar notificaciones si el usuario está autenticado y tiene un token/ID
+        if (!isAuthenticated || !tokenRef.current || !userRef.current?.id) {
             setNotifications([]);
-            setUnreadCount(0); // Reset unread count if no token
+            setUnreadNotificationsCount(0);
             return;
         }
         try {
             const response = await api.get('/api/notifications', {
-                headers: { Authorization: `Bearer ${token}` },
+                headers: { Authorization: `Bearer ${tokenRef.current}` },
             });
-            const fetchedNotifications = Array.isArray(response.data)
-                ? response.data.sort((a: Notification, b: Notification) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
-                : [];
+            // Asegúrate de que la respuesta del backend sea un array de Notification (con id: number)
+            const fetchedNotifications: Notification[] = Array.isArray(response.data) ? response.data : response.data.notifications || [];
             setNotifications(fetchedNotifications);
-            // Update unread count based on fetched notifications
-            setUnreadCount(fetchedNotifications.filter(n => !n.is_read).length);
-        } catch (err) {
-            console.error('Error fetching notifications in context:', err);
-            addNotification('Error al cargar notificaciones.', 'error'); // Usa addNotification aquí
+            setUnreadNotificationsCount(fetchedNotifications.filter(n => !n.is_read).length);
+        } catch (err: unknown) {
+            console.error('Error fetching notifications:', err);
+            if (isAxiosErrorTypeGuard(err)) {
+                const apiError = err.response?.data as ApiResponseError;
+                // Usamos addNotification para mostrar el error como un toast
+                addNotification(`Error al cargar notificaciones: ${apiError?.message || 'Error desconocido'}`, 'error');
+            } else {
+                addNotification('Ocurrió un error inesperado al cargar las notificaciones.', 'error');
+            }
             setNotifications([]);
-            setUnreadCount(0);
+            setUnreadNotificationsCount(0);
         }
-    }, [token, addNotification]); // <-- AÑADIDO: addNotification como dependencia
+    }, [isAuthenticated, addNotification]);
 
-    // Function to mark a single notification as read
-    const markNotificationAsRead = useCallback(async (notificationId: number) => {
-        try {
-            if (!token) return;
-            await api.put(`/api/notifications/${notificationId}/read`, {}, {
-                headers: { Authorization: `Bearer ${token}` },
-            });
-            // Optimistically update local state
-            setNotifications(prev =>
-                prev.map(notif =>
-                    notif.id === notificationId ? { ...notif, is_read: true } : notif
-                )
-            );
-            fetchUnreadCount(); // Update the global unread count
-        } catch (err) {
-            console.error('Error marking notification as read:', err);
-            addNotification('Error al marcar notificación como leída.', 'error');
-        }
-    }, [token, addNotification, fetchUnreadCount]); // Línea 81: Dependencias correctas
-
-    // Function to mark all notifications as read
-    const markAllNotificationsAsRead = useCallback(async () => {
-        try {
-            if (!token) return;
-            await api.put('/api/notifications/mark-all-read', {}, {
-                headers: { Authorization: `Bearer ${token}` },
-            });
-            // Optimistically update local state
-            setNotifications(prev => prev.map(notif => ({ ...notif, is_read: true })));
-            fetchUnreadCount(); // Update the global unread count
-            addNotification('Todas las notificaciones marcadas como leídas.', 'success');
-        } catch (err) {
-            console.error('Error marking all notifications as read:', err);
-            addNotification('Error al marcar todas las notificaciones como leídas.', 'error');
-        }
-    }, [token, addNotification, fetchUnreadCount]); // Línea 98: Dependencias correctas
-
-
-    // Effect to fetch notifications and unread count on component mount or token/user change
+    // Efecto para cargar notificaciones cuando el estado de autenticación cambia
     useEffect(() => {
-        // Only fetch if token is available and user is authenticated (or authLoading is false)
-        if (token && user) { // Ensure user is also available
+        if (isAuthenticated && user) {
             fetchNotifications();
-            fetchUnreadCount();
-        } else if (!token) {
-            // If token is null, clear notifications and count
+        } else {
             setNotifications([]);
-            setUnreadCount(0);
+            setUnreadNotificationsCount(0);
         }
-    }, [token, user, fetchNotifications, fetchUnreadCount]); // Add user to dependencies
+    }, [isAuthenticated, user, fetchNotifications]);
 
-    // Memoize the context value to prevent unnecessary re-renders
-    const contextValue = useMemo(() => ({
+    // Función para marcar una notificación específica como leída en el backend
+    const markNotificationAsRead = useCallback(async (notificationId: number) => {
+        if (!tokenRef.current) {
+            addNotification('No autorizado para marcar notificaciones.', 'error');
+            return;
+        }
+        try {
+            await api.put(`/api/notifications/${notificationId}/read`, {}, {
+                headers: { Authorization: `Bearer ${tokenRef.current}` },
+            });
+            addNotification('Notificación marcada como leída.', 'success');
+            fetchNotifications(); // Recargar para actualizar el estado
+        } catch (err: unknown) {
+            if (isAxiosErrorTypeGuard(err)) {
+                const apiError = err.response?.data as ApiResponseError;
+                addNotification(`Error al marcar notificación: ${apiError?.message || 'Error desconocido'}`, 'error');
+            } else {
+                addNotification('Ocurrió un error inesperado al marcar la notificación.', 'error');
+            }
+            console.error('Error marking notification as read:', err);
+        }
+    }, [addNotification, fetchNotifications]);
+
+    // Función para eliminar una notificación específica del backend
+    const deleteNotification = useCallback(async (notificationId: number) => {
+        if (!tokenRef.current) {
+            addNotification('No autorizado para eliminar notificaciones.', 'error');
+            return;
+        }
+        try {
+            await api.delete(`/api/notifications/${notificationId}`, {
+                headers: { Authorization: `Bearer ${tokenRef.current}` },
+            });
+            addNotification('Notificación eliminada.', 'success');
+            fetchNotifications(); // Recargar para actualizar el estado
+        } catch (err: unknown) {
+            if (isAxiosErrorTypeGuard(err)) {
+                const apiError = err.response?.data as ApiResponseError;
+                addNotification(`Error al eliminar notificación: ${apiError?.message || 'Error desconocido'}`, 'error');
+            } else {
+                addNotification('Ocurrió un error inesperado al eliminar la notificación.', 'error');
+            }
+            console.error('Error deleting notification:', err);
+        }
+    }, [addNotification, fetchNotifications]);
+
+    // Función para marcar todas las notificaciones como leídas en el backend
+    const markAllNotificationsAsRead = useCallback(async () => {
+        if (!tokenRef.current || !userRef.current?.id) {
+            addNotification('No autorizado para marcar notificaciones.', 'error');
+            return;
+        }
+        try {
+            await api.put(`/api/notifications/mark-all-read`, {}, {
+                headers: { Authorization: `Bearer ${tokenRef.current}` },
+            });
+            addNotification('Todas las notificaciones marcadas como leídas.', 'success');
+            fetchNotifications(); // Recargar para actualizar el estado
+        } catch (err: unknown) {
+            if (isAxiosErrorTypeGuard(err)) {
+                const apiError = err.response?.data as ApiResponseError;
+                addNotification(`Error al marcar todas las notificaciones: ${apiError?.message || 'Error desconocido'}`, 'error');
+            } else {
+                addNotification('Ocurrió un error inesperado al marcar todas las notificaciones.', 'error');
+            }
+            console.error('Error marking all notifications as read:', err);
+        }
+    }, [addNotification, fetchNotifications]);
+
+    // Función para eliminar todas las notificaciones del backend
+    const deleteAllNotifications = useCallback(async () => {
+        if (!tokenRef.current || !userRef.current?.id) {
+            addNotification('No autorizado para eliminar notificaciones.', 'error');
+            return;
+        }
+        try {
+            await api.delete(`/api/notifications/delete-all`, {
+                headers: { Authorization: `Bearer ${tokenRef.current}` },
+            });
+            addNotification('Todas las notificaciones eliminadas.', 'success');
+            fetchNotifications(); // Recargar para actualizar el estado
+        } catch (err: unknown) {
+            if (isAxiosErrorTypeGuard(err)) {
+                const apiError = err.response?.data as ApiResponseError;
+                addNotification(`Error al eliminar todas las notificaciones: ${apiError?.message || 'Error desconocido'}`, 'error');
+            } else {
+                addNotification('Ocurrió un error inesperado al eliminar todas las notificaciones.', 'error');
+            }
+            console.error('Error deleting all notifications:', err);
+        }
+    }, [addNotification, fetchNotifications]);
+
+    const value = {
         notifications,
-        unreadCount,
+        toasts,
         addNotification,
-        markNotificationAsRead,
-        markAllNotificationsAsRead,
+        removeToast,
         fetchNotifications,
-        fetchUnreadCount,
-    }), [notifications, unreadCount, addNotification, markNotificationAsRead, markAllNotificationsAsRead, fetchNotifications, fetchUnreadCount]);
+        markNotificationAsRead,
+        deleteNotification,
+        markAllNotificationsAsRead,
+        deleteAllNotifications,
+        unreadNotificationsCount,
+    };
 
     return (
-        <NotificationContext.Provider value={contextValue}>
+        <NotificationContext.Provider value={value}>
             {children}
-            {/* Render a NotificationDisplay component here to show queued notifications */}
-            {notificationQueue.map(notif => (
-                <div
-                    key={notif.id}
-                    className={`fixed bottom-4 right-4 p-3 rounded-md shadow-lg text-white z-[9999]
-                        ${notif.type === 'success' ? 'bg-green-500' : ''}
-                        ${notif.type === 'error' ? 'bg-red-500' : ''}
-                        ${notif.type === 'warning' ? 'bg-yellow-500' : ''}
-                        ${notif.type === 'info' ? 'bg-blue-500' : ''}
-                    `}
-                    style={{ animation: 'fade-in-out 3s forwards' }}
-                    onAnimationEnd={() => removeNotification(notif.id)}
-                >
-                    {notif.message}
-                </div>
-            ))}
+            <div className="fixed bottom-4 right-4 z-[10000] space-y-2">
+                {toasts.map((toast) => (
+                    <div
+                        key={toast.id}
+                        className={`p-4 rounded-lg shadow-lg text-white max-w-xs w-full flex items-center justify-between animate-fade-in-up
+                            ${toast.type === 'success' ? 'bg-green-500' : ''}
+                            ${toast.type === 'error' ? 'bg-red-500' : ''}
+                            ${toast.type === 'info' ? 'bg-blue-500' : ''}
+                            ${toast.type === 'warning' ? 'bg-yellow-500' : ''}
+                        `}
+                        role="alert"
+                    >
+                        <span>{toast.message}</span>
+                        <button onClick={() => removeToast(toast.id)} className="ml-4 text-white opacity-75 hover:opacity-100 focus:outline-none">
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path>
+                            </svg>
+                        </button>
+                    </div>
+                ))}
+            </div>
         </NotificationContext.Provider>
     );
 };

@@ -1,50 +1,39 @@
-// frontend/src/components/Common/DashboardRedirect.tsx
+// src/components/Common/DashboardRedirect.tsx
 import React, { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
-import Layout from '../Layout/Layout'; // Importar Layout para el estado de carga
 
 const DashboardRedirect: React.FC = () => {
-    const { user, authLoading, isAuthenticated } = useAuth();
+    const { user, loading, isAuthenticated } = useAuth(); // CAMBIADO: authLoading a loading
     const navigate = useNavigate();
 
     useEffect(() => {
-        // Solo proceder si la autenticación ha terminado de cargar
-        if (!authLoading) {
+        if (!loading) { // Esperar a que la autenticación inicial termine
             if (isAuthenticated && user) {
-                // Usuario autenticado, redirigir según su rol
                 if (user.role === 'admin') {
-                    navigate('/admin-dashboard', { replace: true });
+                    navigate('/admin-dashboard');
                 } else if (user.role === 'agent') {
-                    navigate('/agent-dashboard', { replace: true });
-                } else if (user.role === 'client') {
-                    navigate('/client-dashboard', { replace: true });
+                    navigate('/agent-dashboard'); // Asumiendo que tienes un dashboard para agentes
                 } else {
-                    // Rol no reconocido, redirigir al login (o a una página de error genérica)
-                    console.warn('Rol de usuario no reconocido, redirigiendo al login.');
-                    navigate('/login', { replace: true });
+                    navigate('/client-dashboard');
                 }
             } else {
-                // No autenticado, redirigir al login
-                navigate('/login', { replace: true });
+                // Si no está autenticado después de la carga, redirigir al login
+                navigate('/login');
             }
         }
-    }, [authLoading, isAuthenticated, user, navigate]); // Dependencias del efecto
+    }, [user, loading, isAuthenticated, navigate]);
 
-    // Mostrar un estado de carga mientras se verifica la autenticación
-    if (authLoading) {
+    // Opcional: Mostrar un spinner o mensaje de carga mientras se redirige
+    if (loading) {
         return (
-            <Layout>
-                <div className="flex justify-center items-center min-h-screen bg-gray-100 text-gray-700">
-                    <p>Cargando sesión de usuario...</p>
-                </div>
-            </Layout>
+            <div className="flex items-center justify-center min-h-screen bg-gray-100">
+                <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-gray-900"></div>
+            </div>
         );
     }
 
-    // Si por alguna razón llega aquí sin redirigir (lo cual no debería pasar con la lógica anterior),
-    // no renderizar nada o un mensaje de fallback.
-    return null;
+    return null; // No renderizar nada si no está cargando y no se ha redirigido aún
 };
 
 export default DashboardRedirect;
